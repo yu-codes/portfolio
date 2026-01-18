@@ -1,0 +1,201 @@
+/* ================================
+   Archives Page Styles
+   ================================ */
+
+.archives {
+    padding: 2rem;
+}
+
+.archives-header {
+    margin-bottom: 3rem;
+    text-align: left;
+}
+
+.archives-header h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    margin-bottom: 1rem;
+    color: var(--text-color);
+}
+
+/* Timeline */
+.timeline {
+    position: relative;
+    padding: 2rem 0;
+    --tl-year-width: 4rem;
+    --tl-year-gap: 2rem;
+    --tl-date-col: 5rem;
+    --tl-dot-col: 1.5rem;
+    --tl-col-gap: 1.5rem;
+    --tl-dot-size: 12px;
+}
+
+.timeline-year {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--tl-year-gap);
+    margin-bottom: 2rem;
+    position: relative;
+    padding-left: 0;
+}
+
+.year-label {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text-color);
+    width: var(--tl-year-width);
+    flex-shrink: 0;
+    text-align: left;
+}
+
+.timeline-items {
+    position: relative;
+    flex: 1;
+}
+
+.timeline-items::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: calc(var(--tl-date-col) + var(--tl-col-gap) + (var(--tl-dot-col) / 2));
+    width: 2px;
+    background-color: var(--border-color);
+}
+
+.timeline-item {
+    display: grid;
+    grid-template-columns: var(--tl-date-col) var(--tl-dot-col) 1fr;
+    column-gap: var(--tl-col-gap);
+    align-items: center;
+    margin-bottom: 1.5rem;
+    position: relative;
+    margin-left: 0;
+}
+
+.timeline-date {
+    font-weight: 600;
+    color: var(--sidebar-text);
+    font-size: 0.9rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+    width: var(--tl-date-col);
+    text-align: right;
+}
+
+.timeline-dot {
+    width: var(--tl-dot-size);
+    height: var(--tl-dot-size);
+    background-color: var(--primary-color);
+    border-radius: 50%;
+    border: 3px solid var(--card-bg);
+    justify-self: center;
+    z-index: 2;
+}
+
+.timeline-title {
+    flex: 1;
+}
+
+.timeline-link {
+    color: var(--text-color);
+    text-decoration: none;
+    font-weight: 400;
+    font-size: 1rem;
+    transition: color 0.2s;
+    line-height: 1.4;
+}
+
+.timeline-link:hover {
+    color: var(--primary-color);
+}
+
+.timeline-tags {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.timeline-tags .tag {
+    background-color: rgba(37, 99, 235, 0.1);
+    color: var(--primary-color);
+    padding: 0.2rem 0.6rem;
+    border-radius: 0.25rem;
+    font-size: 0.8rem;
+    border: none;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .archives {
+        padding: 1rem;
+    }
+    
+    .archives-header {
+        margin-bottom: 2rem;
+    }
+    
+    .archives-header h1 {
+        font-size: 1.5rem;
+    }
+    
+    .timeline {
+        --tl-year-width: 3.5rem;
+        --tl-year-gap: 1rem;
+        --tl-date-col: 4.25rem;
+        --tl-dot-col: 1.25rem;
+        --tl-col-gap: 0.75rem;
+        padding: 1rem 0;
+    }
+
+    .year-label {
+        font-size: 1.2rem;
+    }
+
+    .timeline-date {
+        font-size: 0.85rem;
+    }
+    
+    .timeline-link {
+        font-size: 0.95rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .archives {
+        padding: 0.75rem;
+    }
+    
+    .timeline {
+        --tl-year-width: 3rem;
+        --tl-year-gap: 0.75rem;
+        --tl-date-col: 3.5rem;
+        --tl-dot-col: 1rem;
+        --tl-col-gap: 0.5rem;
+        --tl-dot-size: 10px;
+    }
+    
+    .timeline-year {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    
+    .year-label {
+        font-size: 1.1rem;
+        width: auto;
+    }
+    
+    .timeline-date {
+        font-size: 0.8rem;
+    }
+    
+    .timeline-link {
+        font-size: 0.9rem;
+    }
+    
+    .timeline-tags .tag {
+        font-size: 0.75rem;
+        padding: 0.15rem 0.5rem;
+    }
+}
