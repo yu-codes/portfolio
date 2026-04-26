@@ -1,0 +1,254 @@
+<!doctype html><html lang=en class=html><head><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Layered Architecture - Yu's Portfolio & Learning Hub</title><meta name=description content='Layered architecture separates concerns into distinct layers, improving maintainability, testability, and scalability of applications.
+Traditional MVC Pattern # Traditional MVC for web applications from flask import Flask, request, jsonify, render_template app = Flask(__name__) # Model: Data and business logic class User: def __init__(self, id: int, name: str, email: str): self.id = id self.name = name self.email = email class UserRepository: def __init__(self, db): self.db = db def find_by_id(self, user_id: int) -> User: row = self.db.execute("SELECT * FROM users WHERE id = ?", [user_id]) return User(**row) if row else None def save(self, user: User) -> User: self.db.execute( "INSERT INTO users (name, email) VALUES (?, ?)", [user.name, user.email] ) return user # Controller: Handles requests and coordinates class UserController: def __init__(self, repository: UserRepository): self.repository = repository def get_user(self, user_id: int): user = self.repository.find_by_id(user_id) if not user: return None, 404 return user, 200 def create_user(self, data: dict): user = User(id=None, name=data[&#39;name&#39;], email=data[&#39;email&#39;]) saved = self.repository.save(user) return saved, 201 # View: Presentation (Routes in this case) @app.route(&#39;/users/<int:user_id>&#39;) def get_user(user_id): user, status = controller.get_user(user_id) if status == 404: return jsonify({&#39;error&#39;: &#39;Not found&#39;}), 404 return jsonify({&#39;id&#39;: user.id, &#39;name&#39;: user.name}) Clean Architecture # Domain Layer (innermost) - no external dependencies from dataclasses import dataclass from abc import ABC, abstractmethod from typing import Optional, List @dataclass class User: """Domain entity - pure business logic.""" id: Optional[str] email: str name: str def validate(self) -> bool: return &#39;@&#39; in self.email and len(self.name) > 0 class UserRepository(ABC): """Port - interface for data access.""" @abstractmethod async def find_by_id(self, user_id: str) -> Optional[User]: pass @abstractmethod async def find_by_email(self, email: str) -> Optional[User]: pass @abstractmethod async def save(self, user: User) -> User: pass class EmailService(ABC): """Port - interface for email service.""" @abstractmethod async def send_welcome_email(self, user: User) -> bool: pass # Application Layer - use cases class CreateUserUseCase: """Application service - orchestrates business logic.""" def __init__( self, user_repository: UserRepository, email_service: EmailService ): self.user_repository = user_repository self.email_service = email_service async def execute(self, email: str, name: str) -> User: # Business rule: check for existing email existing = await self.user_repository.find_by_email(email) if existing: raise UserAlreadyExistsError(email) # Create and validate domain entity user = User(id=None, email=email, name=name) if not user.validate(): raise InvalidUserError("Invalid user data") # Persist saved_user = await self.user_repository.save(user) # Side effect: send welcome email await self.email_service.send_welcome_email(saved_user) return saved_user # Infrastructure Layer - adapters class PostgresUserRepository(UserRepository): """Adapter - implements port with PostgreSQL.""" def __init__(self, pool): self.pool = pool async def find_by_id(self, user_id: str) -> Optional[User]: async with self.pool.acquire() as conn: row = await conn.fetchrow( "SELECT * FROM users WHERE id = $1", user_id ) return User(**row) if row else None async def save(self, user: User) -> User: async with self.pool.acquire() as conn: row = await conn.fetchrow( "INSERT INTO users (email, name) VALUES ($1, $2) RETURNING *", user.email, user.name ) return User(**row) class SMTPEmailService(EmailService): """Adapter - implements port with SMTP.""" async def send_welcome_email(self, user: User) -> bool: # SMTP implementation pass # Interface Layer - controllers/handlers from fastapi import FastAPI, Depends, HTTPException from pydantic import BaseModel app = FastAPI() class CreateUserRequest(BaseModel): email: str name: str class UserResponse(BaseModel): id: str email: str name: str @app.post("/users", response_model=UserResponse) async def create_user( request: CreateUserRequest, use_case: CreateUserUseCase = Depends(get_create_user_use_case) ): try: user = await use_case.execute(request.email, request.name) return UserResponse(id=user.id, email=user.email, name=user.name) except UserAlreadyExistsError: raise HTTPException(status_code=409, detail="Email already exists") Dependency Injection from dependency_injector import containers, providers class Container(containers.DeclarativeContainer): config = providers.Configuration() # Infrastructure db_pool = providers.Singleton( create_db_pool, dsn=config.database_url ) # Repositories user_repository = providers.Factory( PostgresUserRepository, pool=db_pool ) # Services email_service = providers.Factory( SMTPEmailService, smtp_host=config.smtp_host ) # Use Cases create_user_use_case = providers.Factory( CreateUserUseCase, user_repository=user_repository, email_service=email_service ) # Usage container = Container() container.config.from_yaml(&#39;config.yaml&#39;) @app.post("/users") @inject async def create_user( request: CreateUserRequest, use_case: CreateUserUseCase = Depends(Provide[Container.create_user_use_case]) ): return await use_case.execute(request.email, request.name) Architecture Comparison Aspect MVC Clean Architecture Hexagonal Layers 3 (M-V-C) 4 (Domain, App, Infra, Interface) Domain + Ports/Adapters Dependencies Can be coupled Always inward Domain independent Testing Moderate Excellent Excellent Complexity Low High Medium Best For Simple apps Complex domains External integrations Layer Dependencies Clean Architecture Dependency Rule: ┌─────────────────────────────────────┐ │ Interface Layer │ ← HTTP, CLI, Events ├─────────────────────────────────────┤ │ Application Layer │ ← Use Cases ├─────────────────────────────────────┤ │ Domain Layer │ ← Entities, Value Objects ├─────────────────────────────────────┤ │ Infrastructure Layer │ ← DB, External APIs └─────────────────────────────────────┘ Dependencies point INWARD only. Inner layers know nothing about outer layers. Best Practices Depend on Abstractions: Use interfaces/protocols, not concrete implementations Keep Domain Pure: No framework dependencies in domain layer Single Responsibility: Each layer has one reason to change Use Dependency Injection: Invert control for testability Test at Boundaries: Unit test domain, integration test adapters Start Simple: Add layers as complexity grows '><meta property="og:title" content="Layered Architecture"><meta property="og:description" content='Layered architecture separates concerns into distinct layers, improving maintainability, testability, and scalability of applications.
+Traditional MVC Pattern # Traditional MVC for web applications from flask import Flask, request, jsonify, render_template app = Flask(__name__) # Model: Data and business logic class User: def __init__(self, id: int, name: str, email: str): self.id = id self.name = name self.email = email class UserRepository: def __init__(self, db): self.db = db def find_by_id(self, user_id: int) -> User: row = self.db.execute("SELECT * FROM users WHERE id = ?", [user_id]) return User(**row) if row else None def save(self, user: User) -> User: self.db.execute( "INSERT INTO users (name, email) VALUES (?, ?)", [user.name, user.email] ) return user # Controller: Handles requests and coordinates class UserController: def __init__(self, repository: UserRepository): self.repository = repository def get_user(self, user_id: int): user = self.repository.find_by_id(user_id) if not user: return None, 404 return user, 200 def create_user(self, data: dict): user = User(id=None, name=data[&#39;name&#39;], email=data[&#39;email&#39;]) saved = self.repository.save(user) return saved, 201 # View: Presentation (Routes in this case) @app.route(&#39;/users/<int:user_id>&#39;) def get_user(user_id): user, status = controller.get_user(user_id) if status == 404: return jsonify({&#39;error&#39;: &#39;Not found&#39;}), 404 return jsonify({&#39;id&#39;: user.id, &#39;name&#39;: user.name}) Clean Architecture # Domain Layer (innermost) - no external dependencies from dataclasses import dataclass from abc import ABC, abstractmethod from typing import Optional, List @dataclass class User: """Domain entity - pure business logic.""" id: Optional[str] email: str name: str def validate(self) -> bool: return &#39;@&#39; in self.email and len(self.name) > 0 class UserRepository(ABC): """Port - interface for data access.""" @abstractmethod async def find_by_id(self, user_id: str) -> Optional[User]: pass @abstractmethod async def find_by_email(self, email: str) -> Optional[User]: pass @abstractmethod async def save(self, user: User) -> User: pass class EmailService(ABC): """Port - interface for email service.""" @abstractmethod async def send_welcome_email(self, user: User) -> bool: pass # Application Layer - use cases class CreateUserUseCase: """Application service - orchestrates business logic.""" def __init__( self, user_repository: UserRepository, email_service: EmailService ): self.user_repository = user_repository self.email_service = email_service async def execute(self, email: str, name: str) -> User: # Business rule: check for existing email existing = await self.user_repository.find_by_email(email) if existing: raise UserAlreadyExistsError(email) # Create and validate domain entity user = User(id=None, email=email, name=name) if not user.validate(): raise InvalidUserError("Invalid user data") # Persist saved_user = await self.user_repository.save(user) # Side effect: send welcome email await self.email_service.send_welcome_email(saved_user) return saved_user # Infrastructure Layer - adapters class PostgresUserRepository(UserRepository): """Adapter - implements port with PostgreSQL.""" def __init__(self, pool): self.pool = pool async def find_by_id(self, user_id: str) -> Optional[User]: async with self.pool.acquire() as conn: row = await conn.fetchrow( "SELECT * FROM users WHERE id = $1", user_id ) return User(**row) if row else None async def save(self, user: User) -> User: async with self.pool.acquire() as conn: row = await conn.fetchrow( "INSERT INTO users (email, name) VALUES ($1, $2) RETURNING *", user.email, user.name ) return User(**row) class SMTPEmailService(EmailService): """Adapter - implements port with SMTP.""" async def send_welcome_email(self, user: User) -> bool: # SMTP implementation pass # Interface Layer - controllers/handlers from fastapi import FastAPI, Depends, HTTPException from pydantic import BaseModel app = FastAPI() class CreateUserRequest(BaseModel): email: str name: str class UserResponse(BaseModel): id: str email: str name: str @app.post("/users", response_model=UserResponse) async def create_user( request: CreateUserRequest, use_case: CreateUserUseCase = Depends(get_create_user_use_case) ): try: user = await use_case.execute(request.email, request.name) return UserResponse(id=user.id, email=user.email, name=user.name) except UserAlreadyExistsError: raise HTTPException(status_code=409, detail="Email already exists") Dependency Injection from dependency_injector import containers, providers class Container(containers.DeclarativeContainer): config = providers.Configuration() # Infrastructure db_pool = providers.Singleton( create_db_pool, dsn=config.database_url ) # Repositories user_repository = providers.Factory( PostgresUserRepository, pool=db_pool ) # Services email_service = providers.Factory( SMTPEmailService, smtp_host=config.smtp_host ) # Use Cases create_user_use_case = providers.Factory( CreateUserUseCase, user_repository=user_repository, email_service=email_service ) # Usage container = Container() container.config.from_yaml(&#39;config.yaml&#39;) @app.post("/users") @inject async def create_user( request: CreateUserRequest, use_case: CreateUserUseCase = Depends(Provide[Container.create_user_use_case]) ): return await use_case.execute(request.email, request.name) Architecture Comparison Aspect MVC Clean Architecture Hexagonal Layers 3 (M-V-C) 4 (Domain, App, Infra, Interface) Domain + Ports/Adapters Dependencies Can be coupled Always inward Domain independent Testing Moderate Excellent Excellent Complexity Low High Medium Best For Simple apps Complex domains External integrations Layer Dependencies Clean Architecture Dependency Rule: ┌─────────────────────────────────────┐ │ Interface Layer │ ← HTTP, CLI, Events ├─────────────────────────────────────┤ │ Application Layer │ ← Use Cases ├─────────────────────────────────────┤ │ Domain Layer │ ← Entities, Value Objects ├─────────────────────────────────────┤ │ Infrastructure Layer │ ← DB, External APIs └─────────────────────────────────────┘ Dependencies point INWARD only. Inner layers know nothing about outer layers. Best Practices Depend on Abstractions: Use interfaces/protocols, not concrete implementations Keep Domain Pure: No framework dependencies in domain layer Single Responsibility: Each layer has one reason to change Use Dependency Injection: Invert control for testability Test at Boundaries: Unit test domain, integration test adapters Start Simple: Add layers as complexity grows '><meta property="og:url" content="https://yu-codes.github.io/portfolio/articles/backend/05-system-design/01-layered-architecture/"><link rel=canonical href=https://yu-codes.github.io/portfolio/articles/backend/05-system-design/01-layered-architecture/><link rel=stylesheet href=https://yu-codes.github.io/portfolio/css/main.css></head><body class=body><div class=container><aside class=sidebar><div class=sidebar-header><h1 class=name>Yu</h1><p class=tagline>Developer, dreamer, debugger.</p></div><nav class=sidebar-nav><a href=https://yu-codes.github.io/portfolio/ class=nav-item><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+<span>HOME</span>
+</a><a href=https://yu-codes.github.io/portfolio/articles/ class="nav-item active"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5.0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5.0 014 19.5v-15A2.5 2.5.0 016.5 2z"/></svg>
+<span>ARTICLES</span>
+</a><a href=https://yu-codes.github.io/portfolio/resume/ class=nav-item><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6A2 2 0 004 4v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+<span>RESUME</span>
+</a><a href=https://yu-codes.github.io/portfolio/projects/ class=nav-item><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8"/><rect x="13" y="3" width="8" height="8"/><rect x="3" y="13" width="8" height="8"/><rect x="13" y="13" width="8" height="8"/></svg>
+<span>PROJECTS</span>
+</a><a href=https://yu-codes.github.io/portfolio/archives/ class=nav-item><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+<span>ARCHIVES</span></a></nav><div class=sidebar-footer><div class=controls><button class="control-btn theme-toggle" title="Toggle theme (light/dark)" aria-label="Toggle theme">
+<svg class="icon-sun" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M12 3a9 9 0 010 18" fill="currentColor" opacity=".9"/><path d="M12 3a9 9 0 000 18" fill="currentColor" opacity=".25"/></svg>
+<svg class="icon-moon" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M12 3a9 9 0 000 18" fill="currentColor" opacity=".9"/><path d="M12 3a9 9 0 010 18" fill="currentColor" opacity=".25"/></svg>
+</button>
+<button class="control-btn lang-toggle" title="Toggle language" aria-label="Toggle language">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3.0 014 10 15.3 15.3.0 01-4 10A15.3 15.3.0 018 12a15.3 15.3.0 014-10z"/></svg></button></div><div class=social-links><a href=https://github.com/yu-codes target=_blank rel="noopener noreferrer" class=social-link title=GitHub><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.374.0.0 5.373.0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931.0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176.0.0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221.0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/></svg>
+</a><a href=mailto:dylan.jhou1120@gmail.com class=social-link title=Email><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1.0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1.0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></a></div></div></aside><div class=main-content><div class=topbar><div class=breadcrumb><a href=https://yu-codes.github.io/portfolio/>HOME</a>
+<span class=separator>&#8250;</span>
+<a href=https://yu-codes.github.io/portfolio/articles/>ARTICLES</a>
+<span class=separator>&#8250;</span>
+<a href=https://yu-codes.github.io/portfolio/articles/backend/>Backend Engineering</a><span class=separator>&#8250;</span>
+<a href=https://yu-codes.github.io/portfolio/articles/backend/05-system-design/>System Design & Architecture</a><span class=separator>&#8250;</span>
+<span>Layered Architecture</span></div></div><main class=content-area><article class=article-content><header class=article-header><h1>Layered Architecture</h1><div class=article-meta><span class=article-description>Understanding MVC, Clean Architecture, and layered design patterns.</span></div></header><nav class=article-toc><h2 class=toc-title>Table of Contents</h2><nav id=TableOfContents><ul><li><a href=#traditional-mvc-pattern>Traditional MVC Pattern</a></li><li><a href=#clean-architecture>Clean Architecture</a></li><li><a href=#dependency-injection>Dependency Injection</a></li><li><a href=#architecture-comparison>Architecture Comparison</a></li><li><a href=#layer-dependencies>Layer Dependencies</a></li><li><a href=#best-practices>Best Practices</a></li></ul></nav></nav><div class=article-body><p>Layered architecture separates concerns into distinct layers, improving maintainability, testability, and scalability of applications.</p><h2 id=traditional-mvc-pattern>Traditional MVC Pattern</h2><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-python data-lang=python><span style=display:flex><span><span style=color:#75715e># Traditional MVC for web applications</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>from</span> flask <span style=color:#f92672>import</span> Flask, request, jsonify, render_template
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>app <span style=color:#f92672>=</span> Flask(__name__)
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e># Model: Data and business logic</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>User</span>:
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>__init__</span>(self, id: int, name: str, email: str):
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>id <span style=color:#f92672>=</span> id
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>name <span style=color:#f92672>=</span> name
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>email <span style=color:#f92672>=</span> email
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>UserRepository</span>:
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>__init__</span>(self, db):
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>db <span style=color:#f92672>=</span> db
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>find_by_id</span>(self, user_id: int) <span style=color:#f92672>-&gt;</span> User:
+</span></span><span style=display:flex><span>        row <span style=color:#f92672>=</span> self<span style=color:#f92672>.</span>db<span style=color:#f92672>.</span>execute(<span style=color:#e6db74>&#34;SELECT * FROM users WHERE id = ?&#34;</span>, [user_id])
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> User(<span style=color:#f92672>**</span>row) <span style=color:#66d9ef>if</span> row <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>None</span>
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>save</span>(self, user: User) <span style=color:#f92672>-&gt;</span> User:
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>db<span style=color:#f92672>.</span>execute(
+</span></span><span style=display:flex><span>            <span style=color:#e6db74>&#34;INSERT INTO users (name, email) VALUES (?, ?)&#34;</span>,
+</span></span><span style=display:flex><span>            [user<span style=color:#f92672>.</span>name, user<span style=color:#f92672>.</span>email]
+</span></span><span style=display:flex><span>        )
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> user
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e># Controller: Handles requests and coordinates</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>UserController</span>:
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>__init__</span>(self, repository: UserRepository):
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>repository <span style=color:#f92672>=</span> repository
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>get_user</span>(self, user_id: int):
+</span></span><span style=display:flex><span>        user <span style=color:#f92672>=</span> self<span style=color:#f92672>.</span>repository<span style=color:#f92672>.</span>find_by_id(user_id)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> <span style=color:#f92672>not</span> user:
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>None</span>, <span style=color:#ae81ff>404</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> user, <span style=color:#ae81ff>200</span>
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>create_user</span>(self, data: dict):
+</span></span><span style=display:flex><span>        user <span style=color:#f92672>=</span> User(id<span style=color:#f92672>=</span><span style=color:#66d9ef>None</span>, name<span style=color:#f92672>=</span>data[<span style=color:#e6db74>&#39;name&#39;</span>], email<span style=color:#f92672>=</span>data[<span style=color:#e6db74>&#39;email&#39;</span>])
+</span></span><span style=display:flex><span>        saved <span style=color:#f92672>=</span> self<span style=color:#f92672>.</span>repository<span style=color:#f92672>.</span>save(user)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> saved, <span style=color:#ae81ff>201</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e># View: Presentation (Routes in this case)</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@app.route</span>(<span style=color:#e6db74>&#39;/users/&lt;int:user_id&gt;&#39;</span>)
+</span></span><span style=display:flex><span><span style=color:#66d9ef>def</span> <span style=color:#a6e22e>get_user</span>(user_id):
+</span></span><span style=display:flex><span>    user, status <span style=color:#f92672>=</span> controller<span style=color:#f92672>.</span>get_user(user_id)
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> status <span style=color:#f92672>==</span> <span style=color:#ae81ff>404</span>:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> jsonify({<span style=color:#e6db74>&#39;error&#39;</span>: <span style=color:#e6db74>&#39;Not found&#39;</span>}), <span style=color:#ae81ff>404</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> jsonify({<span style=color:#e6db74>&#39;id&#39;</span>: user<span style=color:#f92672>.</span>id, <span style=color:#e6db74>&#39;name&#39;</span>: user<span style=color:#f92672>.</span>name})
+</span></span></code></pre></div><h2 id=clean-architecture>Clean Architecture</h2><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-python data-lang=python><span style=display:flex><span><span style=color:#75715e># Domain Layer (innermost) - no external dependencies</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>from</span> dataclasses <span style=color:#f92672>import</span> dataclass
+</span></span><span style=display:flex><span><span style=color:#f92672>from</span> abc <span style=color:#f92672>import</span> ABC, abstractmethod
+</span></span><span style=display:flex><span><span style=color:#f92672>from</span> typing <span style=color:#f92672>import</span> Optional, List
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@dataclass</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>User</span>:
+</span></span><span style=display:flex><span>    <span style=color:#e6db74>&#34;&#34;&#34;Domain entity - pure business logic.&#34;&#34;&#34;</span>
+</span></span><span style=display:flex><span>    id: Optional[str]
+</span></span><span style=display:flex><span>    email: str
+</span></span><span style=display:flex><span>    name: str
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>validate</span>(self) <span style=color:#f92672>-&gt;</span> bool:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#e6db74>&#39;@&#39;</span> <span style=color:#f92672>in</span> self<span style=color:#f92672>.</span>email <span style=color:#f92672>and</span> len(self<span style=color:#f92672>.</span>name) <span style=color:#f92672>&gt;</span> <span style=color:#ae81ff>0</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>UserRepository</span>(ABC):
+</span></span><span style=display:flex><span>    <span style=color:#e6db74>&#34;&#34;&#34;Port - interface for data access.&#34;&#34;&#34;</span>
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#a6e22e>@abstractmethod</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>async</span> <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>find_by_id</span>(self, user_id: str) <span style=color:#f92672>-&gt;</span> Optional[User]:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>pass</span>
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#a6e22e>@abstractmethod</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>async</span> <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>find_by_email</span>(self, email: str) <span style=color:#f92672>-&gt;</span> Optional[User]:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>pass</span>
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#a6e22e>@abstractmethod</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>async</span> <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>save</span>(self, user: User) <span style=color:#f92672>-&gt;</span> User:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>pass</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>EmailService</span>(ABC):
+</span></span><span style=display:flex><span>    <span style=color:#e6db74>&#34;&#34;&#34;Port - interface for email service.&#34;&#34;&#34;</span>
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#a6e22e>@abstractmethod</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>async</span> <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>send_welcome_email</span>(self, user: User) <span style=color:#f92672>-&gt;</span> bool:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>pass</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e># Application Layer - use cases</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>CreateUserUseCase</span>:
+</span></span><span style=display:flex><span>    <span style=color:#e6db74>&#34;&#34;&#34;Application service - orchestrates business logic.&#34;&#34;&#34;</span>
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>__init__</span>(
+</span></span><span style=display:flex><span>        self,
+</span></span><span style=display:flex><span>        user_repository: UserRepository,
+</span></span><span style=display:flex><span>        email_service: EmailService
+</span></span><span style=display:flex><span>    ):
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>user_repository <span style=color:#f92672>=</span> user_repository
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>email_service <span style=color:#f92672>=</span> email_service
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>async</span> <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>execute</span>(self, email: str, name: str) <span style=color:#f92672>-&gt;</span> User:
+</span></span><span style=display:flex><span>        <span style=color:#75715e># Business rule: check for existing email</span>
+</span></span><span style=display:flex><span>        existing <span style=color:#f92672>=</span> <span style=color:#66d9ef>await</span> self<span style=color:#f92672>.</span>user_repository<span style=color:#f92672>.</span>find_by_email(email)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> existing:
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>raise</span> UserAlreadyExistsError(email)
+</span></span><span style=display:flex><span>        
+</span></span><span style=display:flex><span>        <span style=color:#75715e># Create and validate domain entity</span>
+</span></span><span style=display:flex><span>        user <span style=color:#f92672>=</span> User(id<span style=color:#f92672>=</span><span style=color:#66d9ef>None</span>, email<span style=color:#f92672>=</span>email, name<span style=color:#f92672>=</span>name)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> <span style=color:#f92672>not</span> user<span style=color:#f92672>.</span>validate():
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>raise</span> InvalidUserError(<span style=color:#e6db74>&#34;Invalid user data&#34;</span>)
+</span></span><span style=display:flex><span>        
+</span></span><span style=display:flex><span>        <span style=color:#75715e># Persist</span>
+</span></span><span style=display:flex><span>        saved_user <span style=color:#f92672>=</span> <span style=color:#66d9ef>await</span> self<span style=color:#f92672>.</span>user_repository<span style=color:#f92672>.</span>save(user)
+</span></span><span style=display:flex><span>        
+</span></span><span style=display:flex><span>        <span style=color:#75715e># Side effect: send welcome email</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>await</span> self<span style=color:#f92672>.</span>email_service<span style=color:#f92672>.</span>send_welcome_email(saved_user)
+</span></span><span style=display:flex><span>        
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> saved_user
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e># Infrastructure Layer - adapters</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>PostgresUserRepository</span>(UserRepository):
+</span></span><span style=display:flex><span>    <span style=color:#e6db74>&#34;&#34;&#34;Adapter - implements port with PostgreSQL.&#34;&#34;&#34;</span>
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>__init__</span>(self, pool):
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>pool <span style=color:#f92672>=</span> pool
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>async</span> <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>find_by_id</span>(self, user_id: str) <span style=color:#f92672>-&gt;</span> Optional[User]:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>async</span> <span style=color:#66d9ef>with</span> self<span style=color:#f92672>.</span>pool<span style=color:#f92672>.</span>acquire() <span style=color:#66d9ef>as</span> conn:
+</span></span><span style=display:flex><span>            row <span style=color:#f92672>=</span> <span style=color:#66d9ef>await</span> conn<span style=color:#f92672>.</span>fetchrow(
+</span></span><span style=display:flex><span>                <span style=color:#e6db74>&#34;SELECT * FROM users WHERE id = $1&#34;</span>, user_id
+</span></span><span style=display:flex><span>            )
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> User(<span style=color:#f92672>**</span>row) <span style=color:#66d9ef>if</span> row <span style=color:#66d9ef>else</span> <span style=color:#66d9ef>None</span>
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>async</span> <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>save</span>(self, user: User) <span style=color:#f92672>-&gt;</span> User:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>async</span> <span style=color:#66d9ef>with</span> self<span style=color:#f92672>.</span>pool<span style=color:#f92672>.</span>acquire() <span style=color:#66d9ef>as</span> conn:
+</span></span><span style=display:flex><span>            row <span style=color:#f92672>=</span> <span style=color:#66d9ef>await</span> conn<span style=color:#f92672>.</span>fetchrow(
+</span></span><span style=display:flex><span>                <span style=color:#e6db74>&#34;INSERT INTO users (email, name) VALUES ($1, $2) RETURNING *&#34;</span>,
+</span></span><span style=display:flex><span>                user<span style=color:#f92672>.</span>email, user<span style=color:#f92672>.</span>name
+</span></span><span style=display:flex><span>            )
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> User(<span style=color:#f92672>**</span>row)
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>SMTPEmailService</span>(EmailService):
+</span></span><span style=display:flex><span>    <span style=color:#e6db74>&#34;&#34;&#34;Adapter - implements port with SMTP.&#34;&#34;&#34;</span>
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>async</span> <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>send_welcome_email</span>(self, user: User) <span style=color:#f92672>-&gt;</span> bool:
+</span></span><span style=display:flex><span>        <span style=color:#75715e># SMTP implementation</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>pass</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e># Interface Layer - controllers/handlers</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>from</span> fastapi <span style=color:#f92672>import</span> FastAPI, Depends, HTTPException
+</span></span><span style=display:flex><span><span style=color:#f92672>from</span> pydantic <span style=color:#f92672>import</span> BaseModel
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>app <span style=color:#f92672>=</span> FastAPI()
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>CreateUserRequest</span>(BaseModel):
+</span></span><span style=display:flex><span>    email: str
+</span></span><span style=display:flex><span>    name: str
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>UserResponse</span>(BaseModel):
+</span></span><span style=display:flex><span>    id: str
+</span></span><span style=display:flex><span>    email: str
+</span></span><span style=display:flex><span>    name: str
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@app.post</span>(<span style=color:#e6db74>&#34;/users&#34;</span>, response_model<span style=color:#f92672>=</span>UserResponse)
+</span></span><span style=display:flex><span><span style=color:#66d9ef>async</span> <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>create_user</span>(
+</span></span><span style=display:flex><span>    request: CreateUserRequest,
+</span></span><span style=display:flex><span>    use_case: CreateUserUseCase <span style=color:#f92672>=</span> Depends(get_create_user_use_case)
+</span></span><span style=display:flex><span>):
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span>:
+</span></span><span style=display:flex><span>        user <span style=color:#f92672>=</span> <span style=color:#66d9ef>await</span> use_case<span style=color:#f92672>.</span>execute(request<span style=color:#f92672>.</span>email, request<span style=color:#f92672>.</span>name)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> UserResponse(id<span style=color:#f92672>=</span>user<span style=color:#f92672>.</span>id, email<span style=color:#f92672>=</span>user<span style=color:#f92672>.</span>email, name<span style=color:#f92672>=</span>user<span style=color:#f92672>.</span>name)
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>except</span> UserAlreadyExistsError:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>raise</span> HTTPException(status_code<span style=color:#f92672>=</span><span style=color:#ae81ff>409</span>, detail<span style=color:#f92672>=</span><span style=color:#e6db74>&#34;Email already exists&#34;</span>)
+</span></span></code></pre></div><h2 id=dependency-injection>Dependency Injection</h2><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-python data-lang=python><span style=display:flex><span><span style=color:#f92672>from</span> dependency_injector <span style=color:#f92672>import</span> containers, providers
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>Container</span>(containers<span style=color:#f92672>.</span>DeclarativeContainer):
+</span></span><span style=display:flex><span>    config <span style=color:#f92672>=</span> providers<span style=color:#f92672>.</span>Configuration()
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#75715e># Infrastructure</span>
+</span></span><span style=display:flex><span>    db_pool <span style=color:#f92672>=</span> providers<span style=color:#f92672>.</span>Singleton(
+</span></span><span style=display:flex><span>        create_db_pool,
+</span></span><span style=display:flex><span>        dsn<span style=color:#f92672>=</span>config<span style=color:#f92672>.</span>database_url
+</span></span><span style=display:flex><span>    )
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#75715e># Repositories</span>
+</span></span><span style=display:flex><span>    user_repository <span style=color:#f92672>=</span> providers<span style=color:#f92672>.</span>Factory(
+</span></span><span style=display:flex><span>        PostgresUserRepository,
+</span></span><span style=display:flex><span>        pool<span style=color:#f92672>=</span>db_pool
+</span></span><span style=display:flex><span>    )
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#75715e># Services</span>
+</span></span><span style=display:flex><span>    email_service <span style=color:#f92672>=</span> providers<span style=color:#f92672>.</span>Factory(
+</span></span><span style=display:flex><span>        SMTPEmailService,
+</span></span><span style=display:flex><span>        smtp_host<span style=color:#f92672>=</span>config<span style=color:#f92672>.</span>smtp_host
+</span></span><span style=display:flex><span>    )
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#75715e># Use Cases</span>
+</span></span><span style=display:flex><span>    create_user_use_case <span style=color:#f92672>=</span> providers<span style=color:#f92672>.</span>Factory(
+</span></span><span style=display:flex><span>        CreateUserUseCase,
+</span></span><span style=display:flex><span>        user_repository<span style=color:#f92672>=</span>user_repository,
+</span></span><span style=display:flex><span>        email_service<span style=color:#f92672>=</span>email_service
+</span></span><span style=display:flex><span>    )
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e># Usage</span>
+</span></span><span style=display:flex><span>container <span style=color:#f92672>=</span> Container()
+</span></span><span style=display:flex><span>container<span style=color:#f92672>.</span>config<span style=color:#f92672>.</span>from_yaml(<span style=color:#e6db74>&#39;config.yaml&#39;</span>)
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@app.post</span>(<span style=color:#e6db74>&#34;/users&#34;</span>)
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@inject</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>async</span> <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>create_user</span>(
+</span></span><span style=display:flex><span>    request: CreateUserRequest,
+</span></span><span style=display:flex><span>    use_case: CreateUserUseCase <span style=color:#f92672>=</span> Depends(Provide[Container<span style=color:#f92672>.</span>create_user_use_case])
+</span></span><span style=display:flex><span>):
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>await</span> use_case<span style=color:#f92672>.</span>execute(request<span style=color:#f92672>.</span>email, request<span style=color:#f92672>.</span>name)
+</span></span></code></pre></div><h2 id=architecture-comparison>Architecture Comparison</h2><table><thead><tr><th>Aspect</th><th>MVC</th><th>Clean Architecture</th><th>Hexagonal</th></tr></thead><tbody><tr><td><strong>Layers</strong></td><td>3 (M-V-C)</td><td>4 (Domain, App, Infra, Interface)</td><td>Domain + Ports/Adapters</td></tr><tr><td><strong>Dependencies</strong></td><td>Can be coupled</td><td>Always inward</td><td>Domain independent</td></tr><tr><td><strong>Testing</strong></td><td>Moderate</td><td>Excellent</td><td>Excellent</td></tr><tr><td><strong>Complexity</strong></td><td>Low</td><td>High</td><td>Medium</td></tr><tr><td><strong>Best For</strong></td><td>Simple apps</td><td>Complex domains</td><td>External integrations</td></tr></tbody></table><h2 id=layer-dependencies>Layer Dependencies</h2><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-plaintext data-lang=plaintext><span style=display:flex><span>Clean Architecture Dependency Rule:
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>┌─────────────────────────────────────┐
+</span></span><span style=display:flex><span>│         Interface Layer             │  ← HTTP, CLI, Events
+</span></span><span style=display:flex><span>├─────────────────────────────────────┤
+</span></span><span style=display:flex><span>│        Application Layer            │  ← Use Cases
+</span></span><span style=display:flex><span>├─────────────────────────────────────┤
+</span></span><span style=display:flex><span>│          Domain Layer               │  ← Entities, Value Objects
+</span></span><span style=display:flex><span>├─────────────────────────────────────┤
+</span></span><span style=display:flex><span>│       Infrastructure Layer          │  ← DB, External APIs
+</span></span><span style=display:flex><span>└─────────────────────────────────────┘
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>Dependencies point INWARD only.
+</span></span><span style=display:flex><span>Inner layers know nothing about outer layers.
+</span></span></code></pre></div><h2 id=best-practices>Best Practices</h2><ol><li><strong>Depend on Abstractions</strong>: Use interfaces/protocols, not concrete implementations</li><li><strong>Keep Domain Pure</strong>: No framework dependencies in domain layer</li><li><strong>Single Responsibility</strong>: Each layer has one reason to change</li><li><strong>Use Dependency Injection</strong>: Invert control for testability</li><li><strong>Test at Boundaries</strong>: Unit test domain, integration test adapters</li><li><strong>Start Simple</strong>: Add layers as complexity grows</li></ol></div><footer class=article-footer><a href=/portfolio/articles/backend/05-system-design/ class=back-link>← Back to System Design & Architecture</a></footer></article></main><footer class=site-footer><p>&copy; 2026 YuHan Jhou. All rights reserved.</p></footer></div></div><script src=https://yu-codes.github.io/portfolio/js/theme.js defer></script><script src=https://yu-codes.github.io/portfolio/js/roadmap.js defer></script><script src=https://yu-codes.github.io/portfolio/js/parallax.js defer></script><script src=https://yu-codes.github.io/portfolio/js/page-transition.js defer></script></body></html>

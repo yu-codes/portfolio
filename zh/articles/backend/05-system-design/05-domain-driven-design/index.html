@@ -1,0 +1,299 @@
+<!doctype html><html lang=zh class=html><head><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Domain-Driven Design (DDD) - Yu's Portfolio & Learning Hub</title><meta name=description content='Domain-Driven Design provides strategic and tactical patterns for managing complexity in software systems by aligning code with business domains.
+Strategic Design Bounded Contexts and Context Mapping E-commerce Domain Bounded Contexts: ┌─────────────────────────────────────────────────────────────┐ │ Sales Context │ │ ┌───────────┐ ┌──────────┐ ┌───────────┐ ┌──────────┐ │ │ │ Customer │ │ Order │ │ Product │ │ Cart │ │ │ │ (Buyer) │ │ │ │ (Catalog) │ │ │ │ │ └───────────┘ └──────────┘ └───────────┘ └──────────┘ │ └─────────────────────────────────────────────────────────────┘ │ Customer-Supplier │ Partnership ▼ ▼ ┌───────────────────────┐ ┌───────────────────────────────┐ │ Inventory Context │ │ Shipping Context │ │ ┌─────────┐ ┌───────┐ │ │ ┌─────────┐ ┌──────────────┐ │ │ │ Product │ │ Stock │ │ │ │ Shipment│ │ Carrier │ │ │ │ (SKU) │ │ │ │ │ │ │ │ │ │ │ └─────────┘ └───────┘ │ │ └─────────┘ └──────────────┘ │ └───────────────────────┘ └───────────────────────────────┘ Context Mapping Patterns: - Customer-Supplier: Inventory supplies to Sales - Partnership: Sales and Shipping collaborate - Anticorruption Layer: Legacy system integration - Published Language: Shared API contracts Tactical Patterns Entities and Value Objects from dataclasses import dataclass, field from abc import ABC, abstractmethod from typing import Optional, List from decimal import Decimal from datetime import datetime import uuid # Value Object - immutable, identity by value @dataclass(frozen=True) class Money: amount: Decimal currency: str = "USD" def __post_init__(self): if self.amount < 0: raise ValueError("Amount cannot be negative") def add(self, other: "Money") -> "Money": if self.currency != other.currency: raise ValueError("Currency mismatch") return Money(self.amount + other.amount, self.currency) def multiply(self, factor: int) -> "Money": return Money(self.amount * factor, self.currency) @dataclass(frozen=True) class Address: street: str city: str country: str postal_code: str def format(self) -> str: return f"{self.street}, {self.city}, {self.country} {self.postal_code}" # Entity - identity by ID, mutable @dataclass class OrderItem: id: str product_id: str product_name: str quantity: int unit_price: Money @property def subtotal(self) -> Money: return self.unit_price.multiply(self.quantity) def update_quantity(self, new_quantity: int): if new_quantity <= 0: raise ValueError("Quantity must be positive") self.quantity = new_quantity Aggregates and Aggregate Roots # Domain Events @dataclass(frozen=True) class DomainEvent(ABC): occurred_at: datetime = field(default_factory=datetime.utcnow) @property @abstractmethod def event_type(self) -> str: pass @dataclass(frozen=True) class OrderCreated(DomainEvent): order_id: str customer_id: str @property def event_type(self) -> str: return "order.created" @dataclass(frozen=True) class OrderItemAdded(DomainEvent): order_id: str product_id: str quantity: int @property def event_type(self) -> str: return "order.item_added" # Aggregate Root class Order: """Order is the aggregate root for order-related entities.""" def __init__( self, id: str, customer_id: str, shipping_address: Address ): self._id = id self._customer_id = customer_id self._shipping_address = shipping_address self._items: List[OrderItem] = [] self._status = OrderStatus.DRAFT self._events: List[DomainEvent] = [] self._events.append(OrderCreated( order_id=id, customer_id=customer_id )) @property def id(self) -> str: return self._id @property def total(self) -> Money: if not self._items: return Money(Decimal("0")) return sum( (item.subtotal for item in self._items), Money(Decimal("0")) ) @property def events(self) -> List[DomainEvent]: return self._events.copy() def clear_events(self): self._events.clear() # Business operations through aggregate root def add_item( self, product_id: str, product_name: str, quantity: int, unit_price: Money ): if self._status != OrderStatus.DRAFT: raise OrderModificationError("Cannot modify submitted order") # Check for existing item existing = next( (item for item in self._items if item.product_id == product_id), None ) if existing: existing.update_quantity(existing.quantity + quantity) else: item = OrderItem( id=str(uuid.uuid4()), product_id=product_id, product_name=product_name, quantity=quantity, unit_price=unit_price ) self._items.append(item) self._events.append(OrderItemAdded( order_id=self._id, product_id=product_id, quantity=quantity )) def submit(self): if not self._items: raise InvalidOrderError("Cannot submit empty order") if self._status != OrderStatus.DRAFT: raise OrderStateError("Order already submitted") self._status = OrderStatus.SUBMITTED self._events.append(OrderSubmitted(order_id=self._id)) Repository Pattern from abc import ABC, abstractmethod from typing import Optional, List class OrderRepository(ABC): """Repository interface in domain layer.""" @abstractmethod async def find_by_id(self, order_id: str) -> Optional[Order]: pass @abstractmethod async def save(self, order: Order) -> None: pass @abstractmethod async def find_by_customer( self, customer_id: str, status: Optional[OrderStatus] = None ) -> List[Order]: pass # Infrastructure implementation class PostgresOrderRepository(OrderRepository): def __init__(self, pool, event_publisher): self.pool = pool self.event_publisher = event_publisher async def save(self, order: Order) -> None: async with self.pool.acquire() as conn: async with conn.transaction(): # Save aggregate await conn.execute( """INSERT INTO orders (id, customer_id, status, shipping_address, total) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO UPDATE SET status = $3, total = $5""", order.id, order._customer_id, order._status.value, order._shipping_address.__dict__, order.total.amount ) # Save items for item in order._items: await conn.execute( """INSERT INTO order_items (id, order_id, product_id, quantity, unit_price) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO UPDATE SET quantity = $4""", item.id, order.id, item.product_id, item.quantity, item.unit_price.amount ) # Publish domain events after commit for event in order.events: await self.event_publisher.publish(event) order.clear_events() Domain Services class OrderPricingService: """Domain service for complex pricing logic.""" def __init__(self, discount_repository, tax_calculator): self.discount_repository = discount_repository self.tax_calculator = tax_calculator async def calculate_final_price( self, order: Order, customer_id: str ) -> Money: subtotal = order.total # Apply customer discounts discounts = await self.discount_repository.find_applicable( customer_id, subtotal ) discounted = subtotal for discount in discounts: discounted = discount.apply(discounted) # Calculate tax tax = await self.tax_calculator.calculate( discounted, order._shipping_address ) return discounted.add(tax) DDD Building Blocks Summary Pattern Description Example Entity Identity by ID, mutable Order, Customer Value Object Identity by value, immutable Money, Address Aggregate Consistency boundary Order + OrderItems Repository Collection-like persistence OrderRepository Domain Service Stateless domain logic PricingService Domain Event Something that happened OrderCreated Factory Complex object creation OrderFactory Best Practices Model the Ubiquitous Language: Use domain terms in code Keep Aggregates Small: One root, few entities Reference by ID: Between aggregates, not object references Eventual Consistency: Between bounded contexts Domain Events for Integration: Publish events for cross-context communication Protect Invariants: Validate business rules in aggregates '><meta property="og:title" content="Domain-Driven Design (DDD)"><meta property="og:description" content='Domain-Driven Design provides strategic and tactical patterns for managing complexity in software systems by aligning code with business domains.
+Strategic Design Bounded Contexts and Context Mapping E-commerce Domain Bounded Contexts: ┌─────────────────────────────────────────────────────────────┐ │ Sales Context │ │ ┌───────────┐ ┌──────────┐ ┌───────────┐ ┌──────────┐ │ │ │ Customer │ │ Order │ │ Product │ │ Cart │ │ │ │ (Buyer) │ │ │ │ (Catalog) │ │ │ │ │ └───────────┘ └──────────┘ └───────────┘ └──────────┘ │ └─────────────────────────────────────────────────────────────┘ │ Customer-Supplier │ Partnership ▼ ▼ ┌───────────────────────┐ ┌───────────────────────────────┐ │ Inventory Context │ │ Shipping Context │ │ ┌─────────┐ ┌───────┐ │ │ ┌─────────┐ ┌──────────────┐ │ │ │ Product │ │ Stock │ │ │ │ Shipment│ │ Carrier │ │ │ │ (SKU) │ │ │ │ │ │ │ │ │ │ │ └─────────┘ └───────┘ │ │ └─────────┘ └──────────────┘ │ └───────────────────────┘ └───────────────────────────────┘ Context Mapping Patterns: - Customer-Supplier: Inventory supplies to Sales - Partnership: Sales and Shipping collaborate - Anticorruption Layer: Legacy system integration - Published Language: Shared API contracts Tactical Patterns Entities and Value Objects from dataclasses import dataclass, field from abc import ABC, abstractmethod from typing import Optional, List from decimal import Decimal from datetime import datetime import uuid # Value Object - immutable, identity by value @dataclass(frozen=True) class Money: amount: Decimal currency: str = "USD" def __post_init__(self): if self.amount < 0: raise ValueError("Amount cannot be negative") def add(self, other: "Money") -> "Money": if self.currency != other.currency: raise ValueError("Currency mismatch") return Money(self.amount + other.amount, self.currency) def multiply(self, factor: int) -> "Money": return Money(self.amount * factor, self.currency) @dataclass(frozen=True) class Address: street: str city: str country: str postal_code: str def format(self) -> str: return f"{self.street}, {self.city}, {self.country} {self.postal_code}" # Entity - identity by ID, mutable @dataclass class OrderItem: id: str product_id: str product_name: str quantity: int unit_price: Money @property def subtotal(self) -> Money: return self.unit_price.multiply(self.quantity) def update_quantity(self, new_quantity: int): if new_quantity <= 0: raise ValueError("Quantity must be positive") self.quantity = new_quantity Aggregates and Aggregate Roots # Domain Events @dataclass(frozen=True) class DomainEvent(ABC): occurred_at: datetime = field(default_factory=datetime.utcnow) @property @abstractmethod def event_type(self) -> str: pass @dataclass(frozen=True) class OrderCreated(DomainEvent): order_id: str customer_id: str @property def event_type(self) -> str: return "order.created" @dataclass(frozen=True) class OrderItemAdded(DomainEvent): order_id: str product_id: str quantity: int @property def event_type(self) -> str: return "order.item_added" # Aggregate Root class Order: """Order is the aggregate root for order-related entities.""" def __init__( self, id: str, customer_id: str, shipping_address: Address ): self._id = id self._customer_id = customer_id self._shipping_address = shipping_address self._items: List[OrderItem] = [] self._status = OrderStatus.DRAFT self._events: List[DomainEvent] = [] self._events.append(OrderCreated( order_id=id, customer_id=customer_id )) @property def id(self) -> str: return self._id @property def total(self) -> Money: if not self._items: return Money(Decimal("0")) return sum( (item.subtotal for item in self._items), Money(Decimal("0")) ) @property def events(self) -> List[DomainEvent]: return self._events.copy() def clear_events(self): self._events.clear() # Business operations through aggregate root def add_item( self, product_id: str, product_name: str, quantity: int, unit_price: Money ): if self._status != OrderStatus.DRAFT: raise OrderModificationError("Cannot modify submitted order") # Check for existing item existing = next( (item for item in self._items if item.product_id == product_id), None ) if existing: existing.update_quantity(existing.quantity + quantity) else: item = OrderItem( id=str(uuid.uuid4()), product_id=product_id, product_name=product_name, quantity=quantity, unit_price=unit_price ) self._items.append(item) self._events.append(OrderItemAdded( order_id=self._id, product_id=product_id, quantity=quantity )) def submit(self): if not self._items: raise InvalidOrderError("Cannot submit empty order") if self._status != OrderStatus.DRAFT: raise OrderStateError("Order already submitted") self._status = OrderStatus.SUBMITTED self._events.append(OrderSubmitted(order_id=self._id)) Repository Pattern from abc import ABC, abstractmethod from typing import Optional, List class OrderRepository(ABC): """Repository interface in domain layer.""" @abstractmethod async def find_by_id(self, order_id: str) -> Optional[Order]: pass @abstractmethod async def save(self, order: Order) -> None: pass @abstractmethod async def find_by_customer( self, customer_id: str, status: Optional[OrderStatus] = None ) -> List[Order]: pass # Infrastructure implementation class PostgresOrderRepository(OrderRepository): def __init__(self, pool, event_publisher): self.pool = pool self.event_publisher = event_publisher async def save(self, order: Order) -> None: async with self.pool.acquire() as conn: async with conn.transaction(): # Save aggregate await conn.execute( """INSERT INTO orders (id, customer_id, status, shipping_address, total) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO UPDATE SET status = $3, total = $5""", order.id, order._customer_id, order._status.value, order._shipping_address.__dict__, order.total.amount ) # Save items for item in order._items: await conn.execute( """INSERT INTO order_items (id, order_id, product_id, quantity, unit_price) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO UPDATE SET quantity = $4""", item.id, order.id, item.product_id, item.quantity, item.unit_price.amount ) # Publish domain events after commit for event in order.events: await self.event_publisher.publish(event) order.clear_events() Domain Services class OrderPricingService: """Domain service for complex pricing logic.""" def __init__(self, discount_repository, tax_calculator): self.discount_repository = discount_repository self.tax_calculator = tax_calculator async def calculate_final_price( self, order: Order, customer_id: str ) -> Money: subtotal = order.total # Apply customer discounts discounts = await self.discount_repository.find_applicable( customer_id, subtotal ) discounted = subtotal for discount in discounts: discounted = discount.apply(discounted) # Calculate tax tax = await self.tax_calculator.calculate( discounted, order._shipping_address ) return discounted.add(tax) DDD Building Blocks Summary Pattern Description Example Entity Identity by ID, mutable Order, Customer Value Object Identity by value, immutable Money, Address Aggregate Consistency boundary Order + OrderItems Repository Collection-like persistence OrderRepository Domain Service Stateless domain logic PricingService Domain Event Something that happened OrderCreated Factory Complex object creation OrderFactory Best Practices Model the Ubiquitous Language: Use domain terms in code Keep Aggregates Small: One root, few entities Reference by ID: Between aggregates, not object references Eventual Consistency: Between bounded contexts Domain Events for Integration: Publish events for cross-context communication Protect Invariants: Validate business rules in aggregates '><meta property="og:url" content="https://yu-codes.github.io/portfolio/zh/articles/backend/05-system-design/05-domain-driven-design/"><link rel=canonical href=https://yu-codes.github.io/portfolio/zh/articles/backend/05-system-design/05-domain-driven-design/><link rel=stylesheet href=https://yu-codes.github.io/portfolio/css/main.css></head><body class=body><div class=container><aside class=sidebar><div class=sidebar-header><h1 class=name>Yu</h1><p class=tagline>Developer, dreamer, debugger.</p></div><nav class=sidebar-nav><a href=https://yu-codes.github.io/portfolio/zh/ class=nav-item><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+<span>首頁</span>
+</a><a href=https://yu-codes.github.io/portfolio/zh/articles/ class="nav-item active"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5.0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5.0 014 19.5v-15A2.5 2.5.0 016.5 2z"/></svg>
+<span>文章</span>
+</a><a href=https://yu-codes.github.io/portfolio/zh/resume/ class=nav-item><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6A2 2 0 004 4v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+<span>履歷</span>
+</a><a href=https://yu-codes.github.io/portfolio/zh/projects/ class=nav-item><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8"/><rect x="13" y="3" width="8" height="8"/><rect x="3" y="13" width="8" height="8"/><rect x="13" y="13" width="8" height="8"/></svg>
+<span>專案</span>
+</a><a href=https://yu-codes.github.io/portfolio/zh/archives/ class=nav-item><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+<span>歸檔</span></a></nav><div class=sidebar-footer><div class=controls><button class="control-btn theme-toggle" title=切換主題（淺色/深色） aria-label="Toggle theme">
+<svg class="icon-sun" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M12 3a9 9 0 010 18" fill="currentColor" opacity=".9"/><path d="M12 3a9 9 0 000 18" fill="currentColor" opacity=".25"/></svg>
+<svg class="icon-moon" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M12 3a9 9 0 000 18" fill="currentColor" opacity=".9"/><path d="M12 3a9 9 0 010 18" fill="currentColor" opacity=".25"/></svg>
+</button>
+<button class="control-btn lang-toggle" title=切換語言 aria-label="Toggle language">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3.0 014 10 15.3 15.3.0 01-4 10A15.3 15.3.0 018 12a15.3 15.3.0 014-10z"/></svg></button></div><div class=social-links><a href=https://github.com/yu-codes target=_blank rel="noopener noreferrer" class=social-link title=GitHub><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.374.0.0 5.373.0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931.0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176.0.0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221.0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/></svg>
+</a><a href=mailto:dylan.jhou1120@gmail.com class=social-link title=Email><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1.0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1.0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></a></div></div></aside><div class=main-content><div class=topbar><div class=breadcrumb><a href=https://yu-codes.github.io/portfolio/zh/>首頁</a>
+<span class=separator>&#8250;</span>
+<a href=https://yu-codes.github.io/portfolio/zh/articles/>文章</a>
+<span class=separator>&#8250;</span>
+<a href=https://yu-codes.github.io/portfolio/zh/articles/backend/>Backend Engineering</a><span class=separator>&#8250;</span>
+<a href=https://yu-codes.github.io/portfolio/zh/articles/backend/05-system-design/>System Design & Architecture</a><span class=separator>&#8250;</span>
+<span>Domain-Driven Design (DDD)</span></div></div><main class=content-area><article class=article-content><header class=article-header><h1>Domain-Driven Design (DDD)</h1><div class=article-meta><span class=article-description>Applying Domain-Driven Design principles to complex backend systems.</span></div></header><nav class=article-toc><h2 class=toc-title>目錄</h2><nav id=TableOfContents><ul><li><a href=#strategic-design>Strategic Design</a><ul><li><a href=#bounded-contexts-and-context-mapping>Bounded Contexts and Context Mapping</a></li></ul></li><li><a href=#tactical-patterns>Tactical Patterns</a><ul><li><a href=#entities-and-value-objects>Entities and Value Objects</a></li><li><a href=#aggregates-and-aggregate-roots>Aggregates and Aggregate Roots</a></li><li><a href=#repository-pattern>Repository Pattern</a></li><li><a href=#domain-services>Domain Services</a></li></ul></li><li><a href=#ddd-building-blocks-summary>DDD Building Blocks Summary</a></li><li><a href=#best-practices>Best Practices</a></li></ul></nav></nav><div class=article-body><p>Domain-Driven Design provides strategic and tactical patterns for managing complexity in software systems by aligning code with business domains.</p><h2 id=strategic-design>Strategic Design</h2><h3 id=bounded-contexts-and-context-mapping>Bounded Contexts and Context Mapping</h3><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-plaintext data-lang=plaintext><span style=display:flex><span>E-commerce Domain Bounded Contexts:
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>┌─────────────────────────────────────────────────────────────┐
+</span></span><span style=display:flex><span>│                         Sales Context                           │
+</span></span><span style=display:flex><span>│  ┌───────────┐  ┌──────────┐  ┌───────────┐  ┌──────────┐  │
+</span></span><span style=display:flex><span>│  │  Customer │  │  Order   │  │  Product  │  │  Cart    │  │
+</span></span><span style=display:flex><span>│  │ (Buyer)   │  │          │  │ (Catalog) │  │          │  │
+</span></span><span style=display:flex><span>│  └───────────┘  └──────────┘  └───────────┘  └──────────┘  │
+</span></span><span style=display:flex><span>└─────────────────────────────────────────────────────────────┘
+</span></span><span style=display:flex><span>         │ Customer-Supplier                   │ Partnership
+</span></span><span style=display:flex><span>         ▼                                     ▼
+</span></span><span style=display:flex><span>┌───────────────────────┐   ┌───────────────────────────────┐
+</span></span><span style=display:flex><span>│    Inventory Context    │   │        Shipping Context         │
+</span></span><span style=display:flex><span>│  ┌─────────┐ ┌───────┐ │   │  ┌─────────┐ ┌──────────────┐ │
+</span></span><span style=display:flex><span>│  │ Product │ │ Stock │ │   │  │ Shipment│ │   Carrier    │ │
+</span></span><span style=display:flex><span>│  │ (SKU)   │ │       │ │   │  │         │ │              │ │
+</span></span><span style=display:flex><span>│  └─────────┘ └───────┘ │   │  └─────────┘ └──────────────┘ │
+</span></span><span style=display:flex><span>└───────────────────────┘   └───────────────────────────────┘
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>Context Mapping Patterns:
+</span></span><span style=display:flex><span>- Customer-Supplier: Inventory supplies to Sales
+</span></span><span style=display:flex><span>- Partnership: Sales and Shipping collaborate
+</span></span><span style=display:flex><span>- Anticorruption Layer: Legacy system integration
+</span></span><span style=display:flex><span>- Published Language: Shared API contracts
+</span></span></code></pre></div><h2 id=tactical-patterns>Tactical Patterns</h2><h3 id=entities-and-value-objects>Entities and Value Objects</h3><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-python data-lang=python><span style=display:flex><span><span style=color:#f92672>from</span> dataclasses <span style=color:#f92672>import</span> dataclass, field
+</span></span><span style=display:flex><span><span style=color:#f92672>from</span> abc <span style=color:#f92672>import</span> ABC, abstractmethod
+</span></span><span style=display:flex><span><span style=color:#f92672>from</span> typing <span style=color:#f92672>import</span> Optional, List
+</span></span><span style=display:flex><span><span style=color:#f92672>from</span> decimal <span style=color:#f92672>import</span> Decimal
+</span></span><span style=display:flex><span><span style=color:#f92672>from</span> datetime <span style=color:#f92672>import</span> datetime
+</span></span><span style=display:flex><span><span style=color:#f92672>import</span> uuid
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e># Value Object - immutable, identity by value</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@dataclass</span>(frozen<span style=color:#f92672>=</span><span style=color:#66d9ef>True</span>)
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>Money</span>:
+</span></span><span style=display:flex><span>    amount: Decimal
+</span></span><span style=display:flex><span>    currency: str <span style=color:#f92672>=</span> <span style=color:#e6db74>&#34;USD&#34;</span>
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>__post_init__</span>(self):
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> self<span style=color:#f92672>.</span>amount <span style=color:#f92672>&lt;</span> <span style=color:#ae81ff>0</span>:
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>raise</span> <span style=color:#a6e22e>ValueError</span>(<span style=color:#e6db74>&#34;Amount cannot be negative&#34;</span>)
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>add</span>(self, other: <span style=color:#e6db74>&#34;Money&#34;</span>) <span style=color:#f92672>-&gt;</span> <span style=color:#e6db74>&#34;Money&#34;</span>:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> self<span style=color:#f92672>.</span>currency <span style=color:#f92672>!=</span> other<span style=color:#f92672>.</span>currency:
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>raise</span> <span style=color:#a6e22e>ValueError</span>(<span style=color:#e6db74>&#34;Currency mismatch&#34;</span>)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> Money(self<span style=color:#f92672>.</span>amount <span style=color:#f92672>+</span> other<span style=color:#f92672>.</span>amount, self<span style=color:#f92672>.</span>currency)
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>multiply</span>(self, factor: int) <span style=color:#f92672>-&gt;</span> <span style=color:#e6db74>&#34;Money&#34;</span>:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> Money(self<span style=color:#f92672>.</span>amount <span style=color:#f92672>*</span> factor, self<span style=color:#f92672>.</span>currency)
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@dataclass</span>(frozen<span style=color:#f92672>=</span><span style=color:#66d9ef>True</span>)
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>Address</span>:
+</span></span><span style=display:flex><span>    street: str
+</span></span><span style=display:flex><span>    city: str
+</span></span><span style=display:flex><span>    country: str
+</span></span><span style=display:flex><span>    postal_code: str
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>format</span>(self) <span style=color:#f92672>-&gt;</span> str:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#e6db74>f</span><span style=color:#e6db74>&#34;</span><span style=color:#e6db74>{</span>self<span style=color:#f92672>.</span>street<span style=color:#e6db74>}</span><span style=color:#e6db74>, </span><span style=color:#e6db74>{</span>self<span style=color:#f92672>.</span>city<span style=color:#e6db74>}</span><span style=color:#e6db74>, </span><span style=color:#e6db74>{</span>self<span style=color:#f92672>.</span>country<span style=color:#e6db74>}</span><span style=color:#e6db74> </span><span style=color:#e6db74>{</span>self<span style=color:#f92672>.</span>postal_code<span style=color:#e6db74>}</span><span style=color:#e6db74>&#34;</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e># Entity - identity by ID, mutable</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@dataclass</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>OrderItem</span>:
+</span></span><span style=display:flex><span>    id: str
+</span></span><span style=display:flex><span>    product_id: str
+</span></span><span style=display:flex><span>    product_name: str
+</span></span><span style=display:flex><span>    quantity: int
+</span></span><span style=display:flex><span>    unit_price: Money
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#a6e22e>@property</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>subtotal</span>(self) <span style=color:#f92672>-&gt;</span> Money:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> self<span style=color:#f92672>.</span>unit_price<span style=color:#f92672>.</span>multiply(self<span style=color:#f92672>.</span>quantity)
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>update_quantity</span>(self, new_quantity: int):
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> new_quantity <span style=color:#f92672>&lt;=</span> <span style=color:#ae81ff>0</span>:
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>raise</span> <span style=color:#a6e22e>ValueError</span>(<span style=color:#e6db74>&#34;Quantity must be positive&#34;</span>)
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>quantity <span style=color:#f92672>=</span> new_quantity
+</span></span></code></pre></div><h3 id=aggregates-and-aggregate-roots>Aggregates and Aggregate Roots</h3><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-python data-lang=python><span style=display:flex><span><span style=color:#75715e># Domain Events</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@dataclass</span>(frozen<span style=color:#f92672>=</span><span style=color:#66d9ef>True</span>)
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>DomainEvent</span>(ABC):
+</span></span><span style=display:flex><span>    occurred_at: datetime <span style=color:#f92672>=</span> field(default_factory<span style=color:#f92672>=</span>datetime<span style=color:#f92672>.</span>utcnow)
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#a6e22e>@property</span>
+</span></span><span style=display:flex><span>    <span style=color:#a6e22e>@abstractmethod</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>event_type</span>(self) <span style=color:#f92672>-&gt;</span> str:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>pass</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@dataclass</span>(frozen<span style=color:#f92672>=</span><span style=color:#66d9ef>True</span>)
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>OrderCreated</span>(DomainEvent):
+</span></span><span style=display:flex><span>    order_id: str
+</span></span><span style=display:flex><span>    customer_id: str
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#a6e22e>@property</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>event_type</span>(self) <span style=color:#f92672>-&gt;</span> str:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#e6db74>&#34;order.created&#34;</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@dataclass</span>(frozen<span style=color:#f92672>=</span><span style=color:#66d9ef>True</span>)
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>OrderItemAdded</span>(DomainEvent):
+</span></span><span style=display:flex><span>    order_id: str
+</span></span><span style=display:flex><span>    product_id: str
+</span></span><span style=display:flex><span>    quantity: int
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#a6e22e>@property</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>event_type</span>(self) <span style=color:#f92672>-&gt;</span> str:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#e6db74>&#34;order.item_added&#34;</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e># Aggregate Root</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>Order</span>:
+</span></span><span style=display:flex><span>    <span style=color:#e6db74>&#34;&#34;&#34;Order is the aggregate root for order-related entities.&#34;&#34;&#34;</span>
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>__init__</span>(
+</span></span><span style=display:flex><span>        self,
+</span></span><span style=display:flex><span>        id: str,
+</span></span><span style=display:flex><span>        customer_id: str,
+</span></span><span style=display:flex><span>        shipping_address: Address
+</span></span><span style=display:flex><span>    ):
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>_id <span style=color:#f92672>=</span> id
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>_customer_id <span style=color:#f92672>=</span> customer_id
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>_shipping_address <span style=color:#f92672>=</span> shipping_address
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>_items: List[OrderItem] <span style=color:#f92672>=</span> []
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>_status <span style=color:#f92672>=</span> OrderStatus<span style=color:#f92672>.</span>DRAFT
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>_events: List[DomainEvent] <span style=color:#f92672>=</span> []
+</span></span><span style=display:flex><span>        
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>_events<span style=color:#f92672>.</span>append(OrderCreated(
+</span></span><span style=display:flex><span>            order_id<span style=color:#f92672>=</span>id,
+</span></span><span style=display:flex><span>            customer_id<span style=color:#f92672>=</span>customer_id
+</span></span><span style=display:flex><span>        ))
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#a6e22e>@property</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>id</span>(self) <span style=color:#f92672>-&gt;</span> str:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> self<span style=color:#f92672>.</span>_id
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#a6e22e>@property</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>total</span>(self) <span style=color:#f92672>-&gt;</span> Money:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> <span style=color:#f92672>not</span> self<span style=color:#f92672>.</span>_items:
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> Money(Decimal(<span style=color:#e6db74>&#34;0&#34;</span>))
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> sum(
+</span></span><span style=display:flex><span>            (item<span style=color:#f92672>.</span>subtotal <span style=color:#66d9ef>for</span> item <span style=color:#f92672>in</span> self<span style=color:#f92672>.</span>_items),
+</span></span><span style=display:flex><span>            Money(Decimal(<span style=color:#e6db74>&#34;0&#34;</span>))
+</span></span><span style=display:flex><span>        )
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#a6e22e>@property</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>events</span>(self) <span style=color:#f92672>-&gt;</span> List[DomainEvent]:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> self<span style=color:#f92672>.</span>_events<span style=color:#f92672>.</span>copy()
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>clear_events</span>(self):
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>_events<span style=color:#f92672>.</span>clear()
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#75715e># Business operations through aggregate root</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>add_item</span>(
+</span></span><span style=display:flex><span>        self,
+</span></span><span style=display:flex><span>        product_id: str,
+</span></span><span style=display:flex><span>        product_name: str,
+</span></span><span style=display:flex><span>        quantity: int,
+</span></span><span style=display:flex><span>        unit_price: Money
+</span></span><span style=display:flex><span>    ):
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> self<span style=color:#f92672>.</span>_status <span style=color:#f92672>!=</span> OrderStatus<span style=color:#f92672>.</span>DRAFT:
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>raise</span> OrderModificationError(<span style=color:#e6db74>&#34;Cannot modify submitted order&#34;</span>)
+</span></span><span style=display:flex><span>        
+</span></span><span style=display:flex><span>        <span style=color:#75715e># Check for existing item</span>
+</span></span><span style=display:flex><span>        existing <span style=color:#f92672>=</span> next(
+</span></span><span style=display:flex><span>            (item <span style=color:#66d9ef>for</span> item <span style=color:#f92672>in</span> self<span style=color:#f92672>.</span>_items <span style=color:#66d9ef>if</span> item<span style=color:#f92672>.</span>product_id <span style=color:#f92672>==</span> product_id),
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>None</span>
+</span></span><span style=display:flex><span>        )
+</span></span><span style=display:flex><span>        
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> existing:
+</span></span><span style=display:flex><span>            existing<span style=color:#f92672>.</span>update_quantity(existing<span style=color:#f92672>.</span>quantity <span style=color:#f92672>+</span> quantity)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>else</span>:
+</span></span><span style=display:flex><span>            item <span style=color:#f92672>=</span> OrderItem(
+</span></span><span style=display:flex><span>                id<span style=color:#f92672>=</span>str(uuid<span style=color:#f92672>.</span>uuid4()),
+</span></span><span style=display:flex><span>                product_id<span style=color:#f92672>=</span>product_id,
+</span></span><span style=display:flex><span>                product_name<span style=color:#f92672>=</span>product_name,
+</span></span><span style=display:flex><span>                quantity<span style=color:#f92672>=</span>quantity,
+</span></span><span style=display:flex><span>                unit_price<span style=color:#f92672>=</span>unit_price
+</span></span><span style=display:flex><span>            )
+</span></span><span style=display:flex><span>            self<span style=color:#f92672>.</span>_items<span style=color:#f92672>.</span>append(item)
+</span></span><span style=display:flex><span>        
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>_events<span style=color:#f92672>.</span>append(OrderItemAdded(
+</span></span><span style=display:flex><span>            order_id<span style=color:#f92672>=</span>self<span style=color:#f92672>.</span>_id,
+</span></span><span style=display:flex><span>            product_id<span style=color:#f92672>=</span>product_id,
+</span></span><span style=display:flex><span>            quantity<span style=color:#f92672>=</span>quantity
+</span></span><span style=display:flex><span>        ))
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>submit</span>(self):
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> <span style=color:#f92672>not</span> self<span style=color:#f92672>.</span>_items:
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>raise</span> InvalidOrderError(<span style=color:#e6db74>&#34;Cannot submit empty order&#34;</span>)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> self<span style=color:#f92672>.</span>_status <span style=color:#f92672>!=</span> OrderStatus<span style=color:#f92672>.</span>DRAFT:
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>raise</span> OrderStateError(<span style=color:#e6db74>&#34;Order already submitted&#34;</span>)
+</span></span><span style=display:flex><span>        
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>_status <span style=color:#f92672>=</span> OrderStatus<span style=color:#f92672>.</span>SUBMITTED
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>_events<span style=color:#f92672>.</span>append(OrderSubmitted(order_id<span style=color:#f92672>=</span>self<span style=color:#f92672>.</span>_id))
+</span></span></code></pre></div><h3 id=repository-pattern>Repository Pattern</h3><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-python data-lang=python><span style=display:flex><span><span style=color:#f92672>from</span> abc <span style=color:#f92672>import</span> ABC, abstractmethod
+</span></span><span style=display:flex><span><span style=color:#f92672>from</span> typing <span style=color:#f92672>import</span> Optional, List
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>OrderRepository</span>(ABC):
+</span></span><span style=display:flex><span>    <span style=color:#e6db74>&#34;&#34;&#34;Repository interface in domain layer.&#34;&#34;&#34;</span>
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#a6e22e>@abstractmethod</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>async</span> <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>find_by_id</span>(self, order_id: str) <span style=color:#f92672>-&gt;</span> Optional[Order]:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>pass</span>
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#a6e22e>@abstractmethod</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>async</span> <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>save</span>(self, order: Order) <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>None</span>:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>pass</span>
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#a6e22e>@abstractmethod</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>async</span> <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>find_by_customer</span>(
+</span></span><span style=display:flex><span>        self,
+</span></span><span style=display:flex><span>        customer_id: str,
+</span></span><span style=display:flex><span>        status: Optional[OrderStatus] <span style=color:#f92672>=</span> <span style=color:#66d9ef>None</span>
+</span></span><span style=display:flex><span>    ) <span style=color:#f92672>-&gt;</span> List[Order]:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>pass</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e># Infrastructure implementation</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>PostgresOrderRepository</span>(OrderRepository):
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>__init__</span>(self, pool, event_publisher):
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>pool <span style=color:#f92672>=</span> pool
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>event_publisher <span style=color:#f92672>=</span> event_publisher
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>async</span> <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>save</span>(self, order: Order) <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>None</span>:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>async</span> <span style=color:#66d9ef>with</span> self<span style=color:#f92672>.</span>pool<span style=color:#f92672>.</span>acquire() <span style=color:#66d9ef>as</span> conn:
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>async</span> <span style=color:#66d9ef>with</span> conn<span style=color:#f92672>.</span>transaction():
+</span></span><span style=display:flex><span>                <span style=color:#75715e># Save aggregate</span>
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>await</span> conn<span style=color:#f92672>.</span>execute(
+</span></span><span style=display:flex><span>                    <span style=color:#e6db74>&#34;&#34;&#34;INSERT INTO orders (id, customer_id, status, shipping_address, total)
+</span></span></span><span style=display:flex><span><span style=color:#e6db74>                       VALUES ($1, $2, $3, $4, $5)
+</span></span></span><span style=display:flex><span><span style=color:#e6db74>                       ON CONFLICT (id) DO UPDATE SET
+</span></span></span><span style=display:flex><span><span style=color:#e6db74>                       status = $3, total = $5&#34;&#34;&#34;</span>,
+</span></span><span style=display:flex><span>                    order<span style=color:#f92672>.</span>id, order<span style=color:#f92672>.</span>_customer_id, order<span style=color:#f92672>.</span>_status<span style=color:#f92672>.</span>value,
+</span></span><span style=display:flex><span>                    order<span style=color:#f92672>.</span>_shipping_address<span style=color:#f92672>.</span>__dict__, order<span style=color:#f92672>.</span>total<span style=color:#f92672>.</span>amount
+</span></span><span style=display:flex><span>                )
+</span></span><span style=display:flex><span>                
+</span></span><span style=display:flex><span>                <span style=color:#75715e># Save items</span>
+</span></span><span style=display:flex><span>                <span style=color:#66d9ef>for</span> item <span style=color:#f92672>in</span> order<span style=color:#f92672>.</span>_items:
+</span></span><span style=display:flex><span>                    <span style=color:#66d9ef>await</span> conn<span style=color:#f92672>.</span>execute(
+</span></span><span style=display:flex><span>                        <span style=color:#e6db74>&#34;&#34;&#34;INSERT INTO order_items (id, order_id, product_id, quantity, unit_price)
+</span></span></span><span style=display:flex><span><span style=color:#e6db74>                           VALUES ($1, $2, $3, $4, $5)
+</span></span></span><span style=display:flex><span><span style=color:#e6db74>                           ON CONFLICT (id) DO UPDATE SET quantity = $4&#34;&#34;&#34;</span>,
+</span></span><span style=display:flex><span>                        item<span style=color:#f92672>.</span>id, order<span style=color:#f92672>.</span>id, item<span style=color:#f92672>.</span>product_id,
+</span></span><span style=display:flex><span>                        item<span style=color:#f92672>.</span>quantity, item<span style=color:#f92672>.</span>unit_price<span style=color:#f92672>.</span>amount
+</span></span><span style=display:flex><span>                    )
+</span></span><span style=display:flex><span>        
+</span></span><span style=display:flex><span>        <span style=color:#75715e># Publish domain events after commit</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>for</span> event <span style=color:#f92672>in</span> order<span style=color:#f92672>.</span>events:
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>await</span> self<span style=color:#f92672>.</span>event_publisher<span style=color:#f92672>.</span>publish(event)
+</span></span><span style=display:flex><span>        order<span style=color:#f92672>.</span>clear_events()
+</span></span></code></pre></div><h3 id=domain-services>Domain Services</h3><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-python data-lang=python><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>OrderPricingService</span>:
+</span></span><span style=display:flex><span>    <span style=color:#e6db74>&#34;&#34;&#34;Domain service for complex pricing logic.&#34;&#34;&#34;</span>
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>__init__</span>(self, discount_repository, tax_calculator):
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>discount_repository <span style=color:#f92672>=</span> discount_repository
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>tax_calculator <span style=color:#f92672>=</span> tax_calculator
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>async</span> <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>calculate_final_price</span>(
+</span></span><span style=display:flex><span>        self,
+</span></span><span style=display:flex><span>        order: Order,
+</span></span><span style=display:flex><span>        customer_id: str
+</span></span><span style=display:flex><span>    ) <span style=color:#f92672>-&gt;</span> Money:
+</span></span><span style=display:flex><span>        subtotal <span style=color:#f92672>=</span> order<span style=color:#f92672>.</span>total
+</span></span><span style=display:flex><span>        
+</span></span><span style=display:flex><span>        <span style=color:#75715e># Apply customer discounts</span>
+</span></span><span style=display:flex><span>        discounts <span style=color:#f92672>=</span> <span style=color:#66d9ef>await</span> self<span style=color:#f92672>.</span>discount_repository<span style=color:#f92672>.</span>find_applicable(
+</span></span><span style=display:flex><span>            customer_id, subtotal
+</span></span><span style=display:flex><span>        )
+</span></span><span style=display:flex><span>        
+</span></span><span style=display:flex><span>        discounted <span style=color:#f92672>=</span> subtotal
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>for</span> discount <span style=color:#f92672>in</span> discounts:
+</span></span><span style=display:flex><span>            discounted <span style=color:#f92672>=</span> discount<span style=color:#f92672>.</span>apply(discounted)
+</span></span><span style=display:flex><span>        
+</span></span><span style=display:flex><span>        <span style=color:#75715e># Calculate tax</span>
+</span></span><span style=display:flex><span>        tax <span style=color:#f92672>=</span> <span style=color:#66d9ef>await</span> self<span style=color:#f92672>.</span>tax_calculator<span style=color:#f92672>.</span>calculate(
+</span></span><span style=display:flex><span>            discounted,
+</span></span><span style=display:flex><span>            order<span style=color:#f92672>.</span>_shipping_address
+</span></span><span style=display:flex><span>        )
+</span></span><span style=display:flex><span>        
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> discounted<span style=color:#f92672>.</span>add(tax)
+</span></span></code></pre></div><h2 id=ddd-building-blocks-summary>DDD Building Blocks Summary</h2><table><thead><tr><th>Pattern</th><th>Description</th><th>Example</th></tr></thead><tbody><tr><td><strong>Entity</strong></td><td>Identity by ID, mutable</td><td>Order, Customer</td></tr><tr><td><strong>Value Object</strong></td><td>Identity by value, immutable</td><td>Money, Address</td></tr><tr><td><strong>Aggregate</strong></td><td>Consistency boundary</td><td>Order + OrderItems</td></tr><tr><td><strong>Repository</strong></td><td>Collection-like persistence</td><td>OrderRepository</td></tr><tr><td><strong>Domain Service</strong></td><td>Stateless domain logic</td><td>PricingService</td></tr><tr><td><strong>Domain Event</strong></td><td>Something that happened</td><td>OrderCreated</td></tr><tr><td><strong>Factory</strong></td><td>Complex object creation</td><td>OrderFactory</td></tr></tbody></table><h2 id=best-practices>Best Practices</h2><ol><li><strong>Model the Ubiquitous Language</strong>: Use domain terms in code</li><li><strong>Keep Aggregates Small</strong>: One root, few entities</li><li><strong>Reference by ID</strong>: Between aggregates, not object references</li><li><strong>Eventual Consistency</strong>: Between bounded contexts</li><li><strong>Domain Events for Integration</strong>: Publish events for cross-context communication</li><li><strong>Protect Invariants</strong>: Validate business rules in aggregates</li></ol></div><footer class=article-footer><a href=/portfolio/zh/articles/backend/05-system-design/ class=back-link>← 返回 System Design & Architecture</a></footer></article></main><footer class=site-footer><p>&copy; 2026 YuHan Jhou. All rights reserved.</p></footer></div></div><script src=https://yu-codes.github.io/portfolio/js/theme.js defer></script><script src=https://yu-codes.github.io/portfolio/js/roadmap.js defer></script><script src=https://yu-codes.github.io/portfolio/js/parallax.js defer></script><script src=https://yu-codes.github.io/portfolio/js/page-transition.js defer></script></body></html>

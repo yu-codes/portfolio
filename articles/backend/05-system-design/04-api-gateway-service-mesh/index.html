@@ -1,0 +1,335 @@
+<!doctype html><html lang=en class=html><head><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><title>API Gateway & Service Mesh - Yu's Portfolio & Learning Hub</title><meta name=description content='API Gateways and Service Meshes provide essential infrastructure for managing traffic, security, and observability in distributed systems.
+API Gateway Patterns Kong Gateway Configuration # kong.yaml - Declarative configuration _format_version: "3.0" services: - name: user-service url: http://user-service:8080 routes: - name: users-route paths: - /api/v1/users strip_path: false plugins: - name: rate-limiting config: minute: 100 policy: redis redis_host: redis - name: jwt config: secret_is_base64: false claims_to_verify: - exp - name: request-transformer config: add: headers: - X-Service-Name:user-service - name: order-service url: http://order-service:8080 routes: - name: orders-route paths: - /api/v1/orders plugins: - name: rate-limiting config: minute: 50 - name: circuit-breaker config: threshold: 5 timeout: 60 consumers: - username: mobile-app jwt_secrets: - key: mobile-app-key secret: ${JWT_SECRET} plugins: - name: correlation-id config: header_name: X-Correlation-ID generator: uuid - name: prometheus - name: file-log config: path: /var/log/kong/access.log Custom API Gateway with FastAPI from fastapi import FastAPI, Request, HTTPException from fastapi.responses import StreamingResponse import httpx from typing import Dict import asyncio from circuitbreaker import circuit app = FastAPI(title="API Gateway") # Service registry SERVICES: Dict[str, str] = { "users": "http://user-service:8080", "orders": "http://order-service:8080", "products": "http://product-service:8080" } class RateLimiter: def __init__(self, requests_per_minute: int): self.requests_per_minute = requests_per_minute self.requests: Dict[str, list] = {} async def check(self, client_id: str) -> bool: import time now = time.time() minute_ago = now - 60 if client_id not in self.requests: self.requests[client_id] = [] # Clean old requests self.requests[client_id] = [ t for t in self.requests[client_id] if t > minute_ago ] if len(self.requests[client_id]) >= self.requests_per_minute: return False self.requests[client_id].append(now) return True rate_limiter = RateLimiter(requests_per_minute=100) @circuit(failure_threshold=5, recovery_timeout=30) async def forward_request( service_url: str, method: str, path: str, headers: dict, body: bytes ) -> httpx.Response: async with httpx.AsyncClient(timeout=10.0) as client: return await client.request( method=method, url=f"{service_url}{path}", headers=headers, content=body ) @app.api_route("/{service}/{path:path}", methods=["GET", "POST", "PUT", "DELETE"]) async def gateway(service: str, path: str, request: Request): # Validate service if service not in SERVICES: raise HTTPException(status_code=404, detail="Service not found") # Rate limiting client_id = request.headers.get("X-API-Key", request.client.host) if not await rate_limiter.check(client_id): raise HTTPException(status_code=429, detail="Rate limit exceeded") # Prepare headers headers = dict(request.headers) headers.pop("host", None) headers["X-Forwarded-For"] = request.client.host headers["X-Correlation-ID"] = request.headers.get( "X-Correlation-ID", str(uuid.uuid4()) ) # Forward request try: body = await request.body() response = await forward_request( SERVICES[service], request.method, f"/{path}", headers, body ) return StreamingResponse( content=response.iter_bytes(), status_code=response.status_code, headers=dict(response.headers) ) except Exception as e: raise HTTPException(status_code=503, detail="Service unavailable") Service Mesh with Istio Traffic Management # VirtualService for traffic routing apiVersion: networking.istio.io/v1beta1 kind: VirtualService metadata: name: user-service spec: hosts: - user-service http: # Canary deployment: 90/10 split - match: - headers: x-canary: exact: "true" route: - destination: host: user-service subset: v2 - route: - destination: host: user-service subset: v1 weight: 90 - destination: host: user-service subset: v2 weight: 10 retries: attempts: 3 perTryTimeout: 2s retryOn: 5xx,reset,connect-failure timeout: 10s --- # DestinationRule for load balancing and circuit breaking apiVersion: networking.istio.io/v1beta1 kind: DestinationRule metadata: name: user-service spec: host: user-service trafficPolicy: connectionPool: tcp: maxConnections: 100 http: h2UpgradePolicy: UPGRADE http1MaxPendingRequests: 100 http2MaxRequests: 1000 loadBalancer: simple: LEAST_CONN outlierDetection: consecutive5xxErrors: 5 interval: 30s baseEjectionTime: 60s maxEjectionPercent: 50 subsets: - name: v1 labels: version: v1 - name: v2 labels: version: v2 Security Policies # PeerAuthentication for mTLS apiVersion: security.istio.io/v1beta1 kind: PeerAuthentication metadata: name: default namespace: production spec: mtls: mode: STRICT --- # AuthorizationPolicy for service-to-service apiVersion: security.istio.io/v1beta1 kind: AuthorizationPolicy metadata: name: user-service-policy namespace: production spec: selector: matchLabels: app: user-service rules: - from: - source: principals: - cluster.local/ns/production/sa/order-service - cluster.local/ns/production/sa/api-gateway to: - operation: methods: ["GET", "POST"] paths: ["/api/*"] --- # RequestAuthentication for JWT apiVersion: security.istio.io/v1beta1 kind: RequestAuthentication metadata: name: jwt-auth namespace: production spec: selector: matchLabels: app: api-gateway jwtRules: - issuer: "https://auth.example.com" jwksUri: "https://auth.example.com/.well-known/jwks.json" forwardOriginalToken: true Observability # Telemetry configuration apiVersion: telemetry.istio.io/v1alpha1 kind: Telemetry metadata: name: mesh-telemetry namespace: istio-system spec: tracing: - providers: - name: jaeger randomSamplingPercentage: 10 metrics: - providers: - name: prometheus overrides: - match: metric: REQUEST_COUNT tagOverrides: response_code: operation: UPSERT accessLogging: - providers: - name: envoy Gateway vs Service Mesh Comparison Feature API Gateway Service Mesh Combined Traffic Management North-South East-West Both Authentication External clients Service-to-service End-to-end Rate Limiting Per-client Per-service Layered Circuit Breaking Basic Advanced Full Observability Edge metrics Mesh-wide Complete Protocol Support HTTP/REST HTTP, gRPC, TCP All Complexity Low High High Architecture Patterns ┌─────────────────┐ │ Internet │ └────────┬────────┘ │ ┌────────▼────────┐ │ API Gateway │ ← North-South │ (Kong/AWS) │ Auth, Rate Limit └────────┬────────┘ │ ┌───────────────────┼───────────────────┐ │ │ │ ┌───────▼───────┐ ┌───────▼───────┐ ┌───────▼───────┐ │ User Service │ │Order Service │ │Product Service│ │ ┌──────────┐ │ │ ┌──────────┐ │ │ ┌──────────┐ │ │ │ Envoy │ │ │ │ Envoy │ │ │ │ Envoy │ │ │ │ Sidecar │ │ │ │ Sidecar │ │ │ │ Sidecar │ │ │ └──────────┘ │ │ └──────────┘ │ │ └──────────┘ │ └───────────────┘ └───────────────┘ └───────────────┘ │ │ │ └───────────────────┼───────────────────┘ │ ← East-West (Service Mesh) ┌────────▼────────┐ mTLS, Tracing │ Istio Control │ │ Plane │ └─────────────────┘ Best Practices Use Both: API Gateway for edge, Service Mesh for internal Implement mTLS: Encrypt all service-to-service communication Centralize Observability: Unified logging, metrics, and tracing Version APIs: Support multiple versions during migrations Test Failover: Regularly test circuit breakers and retries Start Simple: Add complexity only when needed '><meta property="og:title" content="API Gateway & Service Mesh"><meta property="og:description" content='API Gateways and Service Meshes provide essential infrastructure for managing traffic, security, and observability in distributed systems.
+API Gateway Patterns Kong Gateway Configuration # kong.yaml - Declarative configuration _format_version: "3.0" services: - name: user-service url: http://user-service:8080 routes: - name: users-route paths: - /api/v1/users strip_path: false plugins: - name: rate-limiting config: minute: 100 policy: redis redis_host: redis - name: jwt config: secret_is_base64: false claims_to_verify: - exp - name: request-transformer config: add: headers: - X-Service-Name:user-service - name: order-service url: http://order-service:8080 routes: - name: orders-route paths: - /api/v1/orders plugins: - name: rate-limiting config: minute: 50 - name: circuit-breaker config: threshold: 5 timeout: 60 consumers: - username: mobile-app jwt_secrets: - key: mobile-app-key secret: ${JWT_SECRET} plugins: - name: correlation-id config: header_name: X-Correlation-ID generator: uuid - name: prometheus - name: file-log config: path: /var/log/kong/access.log Custom API Gateway with FastAPI from fastapi import FastAPI, Request, HTTPException from fastapi.responses import StreamingResponse import httpx from typing import Dict import asyncio from circuitbreaker import circuit app = FastAPI(title="API Gateway") # Service registry SERVICES: Dict[str, str] = { "users": "http://user-service:8080", "orders": "http://order-service:8080", "products": "http://product-service:8080" } class RateLimiter: def __init__(self, requests_per_minute: int): self.requests_per_minute = requests_per_minute self.requests: Dict[str, list] = {} async def check(self, client_id: str) -> bool: import time now = time.time() minute_ago = now - 60 if client_id not in self.requests: self.requests[client_id] = [] # Clean old requests self.requests[client_id] = [ t for t in self.requests[client_id] if t > minute_ago ] if len(self.requests[client_id]) >= self.requests_per_minute: return False self.requests[client_id].append(now) return True rate_limiter = RateLimiter(requests_per_minute=100) @circuit(failure_threshold=5, recovery_timeout=30) async def forward_request( service_url: str, method: str, path: str, headers: dict, body: bytes ) -> httpx.Response: async with httpx.AsyncClient(timeout=10.0) as client: return await client.request( method=method, url=f"{service_url}{path}", headers=headers, content=body ) @app.api_route("/{service}/{path:path}", methods=["GET", "POST", "PUT", "DELETE"]) async def gateway(service: str, path: str, request: Request): # Validate service if service not in SERVICES: raise HTTPException(status_code=404, detail="Service not found") # Rate limiting client_id = request.headers.get("X-API-Key", request.client.host) if not await rate_limiter.check(client_id): raise HTTPException(status_code=429, detail="Rate limit exceeded") # Prepare headers headers = dict(request.headers) headers.pop("host", None) headers["X-Forwarded-For"] = request.client.host headers["X-Correlation-ID"] = request.headers.get( "X-Correlation-ID", str(uuid.uuid4()) ) # Forward request try: body = await request.body() response = await forward_request( SERVICES[service], request.method, f"/{path}", headers, body ) return StreamingResponse( content=response.iter_bytes(), status_code=response.status_code, headers=dict(response.headers) ) except Exception as e: raise HTTPException(status_code=503, detail="Service unavailable") Service Mesh with Istio Traffic Management # VirtualService for traffic routing apiVersion: networking.istio.io/v1beta1 kind: VirtualService metadata: name: user-service spec: hosts: - user-service http: # Canary deployment: 90/10 split - match: - headers: x-canary: exact: "true" route: - destination: host: user-service subset: v2 - route: - destination: host: user-service subset: v1 weight: 90 - destination: host: user-service subset: v2 weight: 10 retries: attempts: 3 perTryTimeout: 2s retryOn: 5xx,reset,connect-failure timeout: 10s --- # DestinationRule for load balancing and circuit breaking apiVersion: networking.istio.io/v1beta1 kind: DestinationRule metadata: name: user-service spec: host: user-service trafficPolicy: connectionPool: tcp: maxConnections: 100 http: h2UpgradePolicy: UPGRADE http1MaxPendingRequests: 100 http2MaxRequests: 1000 loadBalancer: simple: LEAST_CONN outlierDetection: consecutive5xxErrors: 5 interval: 30s baseEjectionTime: 60s maxEjectionPercent: 50 subsets: - name: v1 labels: version: v1 - name: v2 labels: version: v2 Security Policies # PeerAuthentication for mTLS apiVersion: security.istio.io/v1beta1 kind: PeerAuthentication metadata: name: default namespace: production spec: mtls: mode: STRICT --- # AuthorizationPolicy for service-to-service apiVersion: security.istio.io/v1beta1 kind: AuthorizationPolicy metadata: name: user-service-policy namespace: production spec: selector: matchLabels: app: user-service rules: - from: - source: principals: - cluster.local/ns/production/sa/order-service - cluster.local/ns/production/sa/api-gateway to: - operation: methods: ["GET", "POST"] paths: ["/api/*"] --- # RequestAuthentication for JWT apiVersion: security.istio.io/v1beta1 kind: RequestAuthentication metadata: name: jwt-auth namespace: production spec: selector: matchLabels: app: api-gateway jwtRules: - issuer: "https://auth.example.com" jwksUri: "https://auth.example.com/.well-known/jwks.json" forwardOriginalToken: true Observability # Telemetry configuration apiVersion: telemetry.istio.io/v1alpha1 kind: Telemetry metadata: name: mesh-telemetry namespace: istio-system spec: tracing: - providers: - name: jaeger randomSamplingPercentage: 10 metrics: - providers: - name: prometheus overrides: - match: metric: REQUEST_COUNT tagOverrides: response_code: operation: UPSERT accessLogging: - providers: - name: envoy Gateway vs Service Mesh Comparison Feature API Gateway Service Mesh Combined Traffic Management North-South East-West Both Authentication External clients Service-to-service End-to-end Rate Limiting Per-client Per-service Layered Circuit Breaking Basic Advanced Full Observability Edge metrics Mesh-wide Complete Protocol Support HTTP/REST HTTP, gRPC, TCP All Complexity Low High High Architecture Patterns ┌─────────────────┐ │ Internet │ └────────┬────────┘ │ ┌────────▼────────┐ │ API Gateway │ ← North-South │ (Kong/AWS) │ Auth, Rate Limit └────────┬────────┘ │ ┌───────────────────┼───────────────────┐ │ │ │ ┌───────▼───────┐ ┌───────▼───────┐ ┌───────▼───────┐ │ User Service │ │Order Service │ │Product Service│ │ ┌──────────┐ │ │ ┌──────────┐ │ │ ┌──────────┐ │ │ │ Envoy │ │ │ │ Envoy │ │ │ │ Envoy │ │ │ │ Sidecar │ │ │ │ Sidecar │ │ │ │ Sidecar │ │ │ └──────────┘ │ │ └──────────┘ │ │ └──────────┘ │ └───────────────┘ └───────────────┘ └───────────────┘ │ │ │ └───────────────────┼───────────────────┘ │ ← East-West (Service Mesh) ┌────────▼────────┐ mTLS, Tracing │ Istio Control │ │ Plane │ └─────────────────┘ Best Practices Use Both: API Gateway for edge, Service Mesh for internal Implement mTLS: Encrypt all service-to-service communication Centralize Observability: Unified logging, metrics, and tracing Version APIs: Support multiple versions during migrations Test Failover: Regularly test circuit breakers and retries Start Simple: Add complexity only when needed '><meta property="og:url" content="https://yu-codes.github.io/portfolio/articles/backend/05-system-design/04-api-gateway-service-mesh/"><link rel=canonical href=https://yu-codes.github.io/portfolio/articles/backend/05-system-design/04-api-gateway-service-mesh/><link rel=stylesheet href=https://yu-codes.github.io/portfolio/css/main.css></head><body class=body><div class=container><aside class=sidebar><div class=sidebar-header><h1 class=name>Yu</h1><p class=tagline>Developer, dreamer, debugger.</p></div><nav class=sidebar-nav><a href=https://yu-codes.github.io/portfolio/ class=nav-item><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+<span>HOME</span>
+</a><a href=https://yu-codes.github.io/portfolio/articles/ class="nav-item active"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5.0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5.0 014 19.5v-15A2.5 2.5.0 016.5 2z"/></svg>
+<span>ARTICLES</span>
+</a><a href=https://yu-codes.github.io/portfolio/resume/ class=nav-item><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6A2 2 0 004 4v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+<span>RESUME</span>
+</a><a href=https://yu-codes.github.io/portfolio/projects/ class=nav-item><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8"/><rect x="13" y="3" width="8" height="8"/><rect x="3" y="13" width="8" height="8"/><rect x="13" y="13" width="8" height="8"/></svg>
+<span>PROJECTS</span>
+</a><a href=https://yu-codes.github.io/portfolio/archives/ class=nav-item><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+<span>ARCHIVES</span></a></nav><div class=sidebar-footer><div class=controls><button class="control-btn theme-toggle" title="Toggle theme (light/dark)" aria-label="Toggle theme">
+<svg class="icon-sun" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M12 3a9 9 0 010 18" fill="currentColor" opacity=".9"/><path d="M12 3a9 9 0 000 18" fill="currentColor" opacity=".25"/></svg>
+<svg class="icon-moon" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M12 3a9 9 0 000 18" fill="currentColor" opacity=".9"/><path d="M12 3a9 9 0 010 18" fill="currentColor" opacity=".25"/></svg>
+</button>
+<button class="control-btn lang-toggle" title="Toggle language" aria-label="Toggle language">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3.0 014 10 15.3 15.3.0 01-4 10A15.3 15.3.0 018 12a15.3 15.3.0 014-10z"/></svg></button></div><div class=social-links><a href=https://github.com/yu-codes target=_blank rel="noopener noreferrer" class=social-link title=GitHub><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.374.0.0 5.373.0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931.0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176.0.0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221.0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/></svg>
+</a><a href=mailto:dylan.jhou1120@gmail.com class=social-link title=Email><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1.0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1.0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></a></div></div></aside><div class=main-content><div class=topbar><div class=breadcrumb><a href=https://yu-codes.github.io/portfolio/>HOME</a>
+<span class=separator>&#8250;</span>
+<a href=https://yu-codes.github.io/portfolio/articles/>ARTICLES</a>
+<span class=separator>&#8250;</span>
+<a href=https://yu-codes.github.io/portfolio/articles/backend/>Backend Engineering</a><span class=separator>&#8250;</span>
+<a href=https://yu-codes.github.io/portfolio/articles/backend/05-system-design/>System Design & Architecture</a><span class=separator>&#8250;</span>
+<span>API Gateway & Service Mesh</span></div></div><main class=content-area><article class=article-content><header class=article-header><h1>API Gateway & Service Mesh</h1><div class=article-meta><span class=article-description>Managing microservices communication with API Gateway and Service Mesh patterns.</span></div></header><nav class=article-toc><h2 class=toc-title>Table of Contents</h2><nav id=TableOfContents><ul><li><a href=#api-gateway-patterns>API Gateway Patterns</a><ul><li><a href=#kong-gateway-configuration>Kong Gateway Configuration</a></li><li><a href=#custom-api-gateway-with-fastapi>Custom API Gateway with FastAPI</a></li></ul></li><li><a href=#service-mesh-with-istio>Service Mesh with Istio</a><ul><li><a href=#traffic-management>Traffic Management</a></li><li><a href=#security-policies>Security Policies</a></li><li><a href=#observability>Observability</a></li></ul></li><li><a href=#gateway-vs-service-mesh-comparison>Gateway vs Service Mesh Comparison</a></li><li><a href=#architecture-patterns>Architecture Patterns</a></li><li><a href=#best-practices>Best Practices</a></li></ul></nav></nav><div class=article-body><p>API Gateways and Service Meshes provide essential infrastructure for managing traffic, security, and observability in distributed systems.</p><h2 id=api-gateway-patterns>API Gateway Patterns</h2><h3 id=kong-gateway-configuration>Kong Gateway Configuration</h3><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-yaml data-lang=yaml><span style=display:flex><span><span style=color:#75715e># kong.yaml - Declarative configuration</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>_format_version</span>: <span style=color:#e6db74>&#34;3.0&#34;</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#f92672>services</span>:
+</span></span><span style=display:flex><span>  - <span style=color:#f92672>name</span>: <span style=color:#ae81ff>user-service</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>url</span>: <span style=color:#ae81ff>http://user-service:8080</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>routes</span>:
+</span></span><span style=display:flex><span>      - <span style=color:#f92672>name</span>: <span style=color:#ae81ff>users-route</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>paths</span>:
+</span></span><span style=display:flex><span>          - <span style=color:#ae81ff>/api/v1/users</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>strip_path</span>: <span style=color:#66d9ef>false</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>plugins</span>:
+</span></span><span style=display:flex><span>      - <span style=color:#f92672>name</span>: <span style=color:#ae81ff>rate-limiting</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>config</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>minute</span>: <span style=color:#ae81ff>100</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>policy</span>: <span style=color:#ae81ff>redis</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>redis_host</span>: <span style=color:#ae81ff>redis</span>
+</span></span><span style=display:flex><span>      - <span style=color:#f92672>name</span>: <span style=color:#ae81ff>jwt</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>config</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>secret_is_base64</span>: <span style=color:#66d9ef>false</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>claims_to_verify</span>:
+</span></span><span style=display:flex><span>            - <span style=color:#ae81ff>exp</span>
+</span></span><span style=display:flex><span>      - <span style=color:#f92672>name</span>: <span style=color:#ae81ff>request-transformer</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>config</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>add</span>:
+</span></span><span style=display:flex><span>            <span style=color:#f92672>headers</span>:
+</span></span><span style=display:flex><span>              - <span style=color:#ae81ff>X-Service-Name:user-service</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  - <span style=color:#f92672>name</span>: <span style=color:#ae81ff>order-service</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>url</span>: <span style=color:#ae81ff>http://order-service:8080</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>routes</span>:
+</span></span><span style=display:flex><span>      - <span style=color:#f92672>name</span>: <span style=color:#ae81ff>orders-route</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>paths</span>:
+</span></span><span style=display:flex><span>          - <span style=color:#ae81ff>/api/v1/orders</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>plugins</span>:
+</span></span><span style=display:flex><span>      - <span style=color:#f92672>name</span>: <span style=color:#ae81ff>rate-limiting</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>config</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>minute</span>: <span style=color:#ae81ff>50</span>
+</span></span><span style=display:flex><span>      - <span style=color:#f92672>name</span>: <span style=color:#ae81ff>circuit-breaker</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>config</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>threshold</span>: <span style=color:#ae81ff>5</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>timeout</span>: <span style=color:#ae81ff>60</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#f92672>consumers</span>:
+</span></span><span style=display:flex><span>  - <span style=color:#f92672>username</span>: <span style=color:#ae81ff>mobile-app</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>jwt_secrets</span>:
+</span></span><span style=display:flex><span>      - <span style=color:#f92672>key</span>: <span style=color:#ae81ff>mobile-app-key</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>secret</span>: <span style=color:#ae81ff>${JWT_SECRET}</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#f92672>plugins</span>:
+</span></span><span style=display:flex><span>  - <span style=color:#f92672>name</span>: <span style=color:#ae81ff>correlation-id</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>config</span>:
+</span></span><span style=display:flex><span>      <span style=color:#f92672>header_name</span>: <span style=color:#ae81ff>X-Correlation-ID</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>generator</span>: <span style=color:#ae81ff>uuid</span>
+</span></span><span style=display:flex><span>  - <span style=color:#f92672>name</span>: <span style=color:#ae81ff>prometheus</span>
+</span></span><span style=display:flex><span>  - <span style=color:#f92672>name</span>: <span style=color:#ae81ff>file-log</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>config</span>:
+</span></span><span style=display:flex><span>      <span style=color:#f92672>path</span>: <span style=color:#ae81ff>/var/log/kong/access.log</span>
+</span></span></code></pre></div><h3 id=custom-api-gateway-with-fastapi>Custom API Gateway with FastAPI</h3><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-python data-lang=python><span style=display:flex><span><span style=color:#f92672>from</span> fastapi <span style=color:#f92672>import</span> FastAPI, Request, HTTPException
+</span></span><span style=display:flex><span><span style=color:#f92672>from</span> fastapi.responses <span style=color:#f92672>import</span> StreamingResponse
+</span></span><span style=display:flex><span><span style=color:#f92672>import</span> httpx
+</span></span><span style=display:flex><span><span style=color:#f92672>from</span> typing <span style=color:#f92672>import</span> Dict
+</span></span><span style=display:flex><span><span style=color:#f92672>import</span> asyncio
+</span></span><span style=display:flex><span><span style=color:#f92672>from</span> circuitbreaker <span style=color:#f92672>import</span> circuit
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>app <span style=color:#f92672>=</span> FastAPI(title<span style=color:#f92672>=</span><span style=color:#e6db74>&#34;API Gateway&#34;</span>)
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e># Service registry</span>
+</span></span><span style=display:flex><span>SERVICES: Dict[str, str] <span style=color:#f92672>=</span> {
+</span></span><span style=display:flex><span>    <span style=color:#e6db74>&#34;users&#34;</span>: <span style=color:#e6db74>&#34;http://user-service:8080&#34;</span>,
+</span></span><span style=display:flex><span>    <span style=color:#e6db74>&#34;orders&#34;</span>: <span style=color:#e6db74>&#34;http://order-service:8080&#34;</span>,
+</span></span><span style=display:flex><span>    <span style=color:#e6db74>&#34;products&#34;</span>: <span style=color:#e6db74>&#34;http://product-service:8080&#34;</span>
+</span></span><span style=display:flex><span>}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>RateLimiter</span>:
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>__init__</span>(self, requests_per_minute: int):
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>requests_per_minute <span style=color:#f92672>=</span> requests_per_minute
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>requests: Dict[str, list] <span style=color:#f92672>=</span> {}
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>async</span> <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>check</span>(self, client_id: str) <span style=color:#f92672>-&gt;</span> bool:
+</span></span><span style=display:flex><span>        <span style=color:#f92672>import</span> time
+</span></span><span style=display:flex><span>        now <span style=color:#f92672>=</span> time<span style=color:#f92672>.</span>time()
+</span></span><span style=display:flex><span>        minute_ago <span style=color:#f92672>=</span> now <span style=color:#f92672>-</span> <span style=color:#ae81ff>60</span>
+</span></span><span style=display:flex><span>        
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> client_id <span style=color:#f92672>not</span> <span style=color:#f92672>in</span> self<span style=color:#f92672>.</span>requests:
+</span></span><span style=display:flex><span>            self<span style=color:#f92672>.</span>requests[client_id] <span style=color:#f92672>=</span> []
+</span></span><span style=display:flex><span>        
+</span></span><span style=display:flex><span>        <span style=color:#75715e># Clean old requests</span>
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>requests[client_id] <span style=color:#f92672>=</span> [
+</span></span><span style=display:flex><span>            t <span style=color:#66d9ef>for</span> t <span style=color:#f92672>in</span> self<span style=color:#f92672>.</span>requests[client_id] <span style=color:#66d9ef>if</span> t <span style=color:#f92672>&gt;</span> minute_ago
+</span></span><span style=display:flex><span>        ]
+</span></span><span style=display:flex><span>        
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>if</span> len(self<span style=color:#f92672>.</span>requests[client_id]) <span style=color:#f92672>&gt;=</span> self<span style=color:#f92672>.</span>requests_per_minute:
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>False</span>
+</span></span><span style=display:flex><span>        
+</span></span><span style=display:flex><span>        self<span style=color:#f92672>.</span>requests[client_id]<span style=color:#f92672>.</span>append(now)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>True</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>rate_limiter <span style=color:#f92672>=</span> RateLimiter(requests_per_minute<span style=color:#f92672>=</span><span style=color:#ae81ff>100</span>)
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@circuit</span>(failure_threshold<span style=color:#f92672>=</span><span style=color:#ae81ff>5</span>, recovery_timeout<span style=color:#f92672>=</span><span style=color:#ae81ff>30</span>)
+</span></span><span style=display:flex><span><span style=color:#66d9ef>async</span> <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>forward_request</span>(
+</span></span><span style=display:flex><span>    service_url: str,
+</span></span><span style=display:flex><span>    method: str,
+</span></span><span style=display:flex><span>    path: str,
+</span></span><span style=display:flex><span>    headers: dict,
+</span></span><span style=display:flex><span>    body: bytes
+</span></span><span style=display:flex><span>) <span style=color:#f92672>-&gt;</span> httpx<span style=color:#f92672>.</span>Response:
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>async</span> <span style=color:#66d9ef>with</span> httpx<span style=color:#f92672>.</span>AsyncClient(timeout<span style=color:#f92672>=</span><span style=color:#ae81ff>10.0</span>) <span style=color:#66d9ef>as</span> client:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> <span style=color:#66d9ef>await</span> client<span style=color:#f92672>.</span>request(
+</span></span><span style=display:flex><span>            method<span style=color:#f92672>=</span>method,
+</span></span><span style=display:flex><span>            url<span style=color:#f92672>=</span><span style=color:#e6db74>f</span><span style=color:#e6db74>&#34;</span><span style=color:#e6db74>{</span>service_url<span style=color:#e6db74>}{</span>path<span style=color:#e6db74>}</span><span style=color:#e6db74>&#34;</span>,
+</span></span><span style=display:flex><span>            headers<span style=color:#f92672>=</span>headers,
+</span></span><span style=display:flex><span>            content<span style=color:#f92672>=</span>body
+</span></span><span style=display:flex><span>        )
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@app.api_route</span>(<span style=color:#e6db74>&#34;/</span><span style=color:#e6db74>{service}</span><span style=color:#e6db74>/{path:path}&#34;</span>, methods<span style=color:#f92672>=</span>[<span style=color:#e6db74>&#34;GET&#34;</span>, <span style=color:#e6db74>&#34;POST&#34;</span>, <span style=color:#e6db74>&#34;PUT&#34;</span>, <span style=color:#e6db74>&#34;DELETE&#34;</span>])
+</span></span><span style=display:flex><span><span style=color:#66d9ef>async</span> <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>gateway</span>(service: str, path: str, request: Request):
+</span></span><span style=display:flex><span>    <span style=color:#75715e># Validate service</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> service <span style=color:#f92672>not</span> <span style=color:#f92672>in</span> SERVICES:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>raise</span> HTTPException(status_code<span style=color:#f92672>=</span><span style=color:#ae81ff>404</span>, detail<span style=color:#f92672>=</span><span style=color:#e6db74>&#34;Service not found&#34;</span>)
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#75715e># Rate limiting</span>
+</span></span><span style=display:flex><span>    client_id <span style=color:#f92672>=</span> request<span style=color:#f92672>.</span>headers<span style=color:#f92672>.</span>get(<span style=color:#e6db74>&#34;X-API-Key&#34;</span>, request<span style=color:#f92672>.</span>client<span style=color:#f92672>.</span>host)
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>if</span> <span style=color:#f92672>not</span> <span style=color:#66d9ef>await</span> rate_limiter<span style=color:#f92672>.</span>check(client_id):
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>raise</span> HTTPException(status_code<span style=color:#f92672>=</span><span style=color:#ae81ff>429</span>, detail<span style=color:#f92672>=</span><span style=color:#e6db74>&#34;Rate limit exceeded&#34;</span>)
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#75715e># Prepare headers</span>
+</span></span><span style=display:flex><span>    headers <span style=color:#f92672>=</span> dict(request<span style=color:#f92672>.</span>headers)
+</span></span><span style=display:flex><span>    headers<span style=color:#f92672>.</span>pop(<span style=color:#e6db74>&#34;host&#34;</span>, <span style=color:#66d9ef>None</span>)
+</span></span><span style=display:flex><span>    headers[<span style=color:#e6db74>&#34;X-Forwarded-For&#34;</span>] <span style=color:#f92672>=</span> request<span style=color:#f92672>.</span>client<span style=color:#f92672>.</span>host
+</span></span><span style=display:flex><span>    headers[<span style=color:#e6db74>&#34;X-Correlation-ID&#34;</span>] <span style=color:#f92672>=</span> request<span style=color:#f92672>.</span>headers<span style=color:#f92672>.</span>get(
+</span></span><span style=display:flex><span>        <span style=color:#e6db74>&#34;X-Correlation-ID&#34;</span>, str(uuid<span style=color:#f92672>.</span>uuid4())
+</span></span><span style=display:flex><span>    )
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#75715e># Forward request</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>try</span>:
+</span></span><span style=display:flex><span>        body <span style=color:#f92672>=</span> <span style=color:#66d9ef>await</span> request<span style=color:#f92672>.</span>body()
+</span></span><span style=display:flex><span>        response <span style=color:#f92672>=</span> <span style=color:#66d9ef>await</span> forward_request(
+</span></span><span style=display:flex><span>            SERVICES[service],
+</span></span><span style=display:flex><span>            request<span style=color:#f92672>.</span>method,
+</span></span><span style=display:flex><span>            <span style=color:#e6db74>f</span><span style=color:#e6db74>&#34;/</span><span style=color:#e6db74>{</span>path<span style=color:#e6db74>}</span><span style=color:#e6db74>&#34;</span>,
+</span></span><span style=display:flex><span>            headers,
+</span></span><span style=display:flex><span>            body
+</span></span><span style=display:flex><span>        )
+</span></span><span style=display:flex><span>        
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>return</span> StreamingResponse(
+</span></span><span style=display:flex><span>            content<span style=color:#f92672>=</span>response<span style=color:#f92672>.</span>iter_bytes(),
+</span></span><span style=display:flex><span>            status_code<span style=color:#f92672>=</span>response<span style=color:#f92672>.</span>status_code,
+</span></span><span style=display:flex><span>            headers<span style=color:#f92672>=</span>dict(response<span style=color:#f92672>.</span>headers)
+</span></span><span style=display:flex><span>        )
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>except</span> <span style=color:#a6e22e>Exception</span> <span style=color:#66d9ef>as</span> e:
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>raise</span> HTTPException(status_code<span style=color:#f92672>=</span><span style=color:#ae81ff>503</span>, detail<span style=color:#f92672>=</span><span style=color:#e6db74>&#34;Service unavailable&#34;</span>)
+</span></span></code></pre></div><h2 id=service-mesh-with-istio>Service Mesh with Istio</h2><h3 id=traffic-management>Traffic Management</h3><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-yaml data-lang=yaml><span style=display:flex><span><span style=color:#75715e># VirtualService for traffic routing</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>apiVersion</span>: <span style=color:#ae81ff>networking.istio.io/v1beta1</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>kind</span>: <span style=color:#ae81ff>VirtualService</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>metadata</span>:
+</span></span><span style=display:flex><span>  <span style=color:#f92672>name</span>: <span style=color:#ae81ff>user-service</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>spec</span>:
+</span></span><span style=display:flex><span>  <span style=color:#f92672>hosts</span>:
+</span></span><span style=display:flex><span>    - <span style=color:#ae81ff>user-service</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>http</span>:
+</span></span><span style=display:flex><span>    <span style=color:#75715e># Canary deployment: 90/10 split</span>
+</span></span><span style=display:flex><span>    - <span style=color:#f92672>match</span>:
+</span></span><span style=display:flex><span>        - <span style=color:#f92672>headers</span>:
+</span></span><span style=display:flex><span>            <span style=color:#f92672>x-canary</span>:
+</span></span><span style=display:flex><span>              <span style=color:#f92672>exact</span>: <span style=color:#e6db74>&#34;true&#34;</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>route</span>:
+</span></span><span style=display:flex><span>        - <span style=color:#f92672>destination</span>:
+</span></span><span style=display:flex><span>            <span style=color:#f92672>host</span>: <span style=color:#ae81ff>user-service</span>
+</span></span><span style=display:flex><span>            <span style=color:#f92672>subset</span>: <span style=color:#ae81ff>v2</span>
+</span></span><span style=display:flex><span>    - <span style=color:#f92672>route</span>:
+</span></span><span style=display:flex><span>        - <span style=color:#f92672>destination</span>:
+</span></span><span style=display:flex><span>            <span style=color:#f92672>host</span>: <span style=color:#ae81ff>user-service</span>
+</span></span><span style=display:flex><span>            <span style=color:#f92672>subset</span>: <span style=color:#ae81ff>v1</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>weight</span>: <span style=color:#ae81ff>90</span>
+</span></span><span style=display:flex><span>        - <span style=color:#f92672>destination</span>:
+</span></span><span style=display:flex><span>            <span style=color:#f92672>host</span>: <span style=color:#ae81ff>user-service</span>
+</span></span><span style=display:flex><span>            <span style=color:#f92672>subset</span>: <span style=color:#ae81ff>v2</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>weight</span>: <span style=color:#ae81ff>10</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>retries</span>:
+</span></span><span style=display:flex><span>        <span style=color:#f92672>attempts</span>: <span style=color:#ae81ff>3</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>perTryTimeout</span>: <span style=color:#ae81ff>2s</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>retryOn</span>: <span style=color:#ae81ff>5xx,reset,connect-failure</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>timeout</span>: <span style=color:#ae81ff>10s</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>---
+</span></span><span style=display:flex><span><span style=color:#75715e># DestinationRule for load balancing and circuit breaking</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>apiVersion</span>: <span style=color:#ae81ff>networking.istio.io/v1beta1</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>kind</span>: <span style=color:#ae81ff>DestinationRule</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>metadata</span>:
+</span></span><span style=display:flex><span>  <span style=color:#f92672>name</span>: <span style=color:#ae81ff>user-service</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>spec</span>:
+</span></span><span style=display:flex><span>  <span style=color:#f92672>host</span>: <span style=color:#ae81ff>user-service</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>trafficPolicy</span>:
+</span></span><span style=display:flex><span>    <span style=color:#f92672>connectionPool</span>:
+</span></span><span style=display:flex><span>      <span style=color:#f92672>tcp</span>:
+</span></span><span style=display:flex><span>        <span style=color:#f92672>maxConnections</span>: <span style=color:#ae81ff>100</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>http</span>:
+</span></span><span style=display:flex><span>        <span style=color:#f92672>h2UpgradePolicy</span>: <span style=color:#ae81ff>UPGRADE</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>http1MaxPendingRequests</span>: <span style=color:#ae81ff>100</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>http2MaxRequests</span>: <span style=color:#ae81ff>1000</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>loadBalancer</span>:
+</span></span><span style=display:flex><span>      <span style=color:#f92672>simple</span>: <span style=color:#ae81ff>LEAST_CONN</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>outlierDetection</span>:
+</span></span><span style=display:flex><span>      <span style=color:#f92672>consecutive5xxErrors</span>: <span style=color:#ae81ff>5</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>interval</span>: <span style=color:#ae81ff>30s</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>baseEjectionTime</span>: <span style=color:#ae81ff>60s</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>maxEjectionPercent</span>: <span style=color:#ae81ff>50</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>subsets</span>:
+</span></span><span style=display:flex><span>    - <span style=color:#f92672>name</span>: <span style=color:#ae81ff>v1</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>labels</span>:
+</span></span><span style=display:flex><span>        <span style=color:#f92672>version</span>: <span style=color:#ae81ff>v1</span>
+</span></span><span style=display:flex><span>    - <span style=color:#f92672>name</span>: <span style=color:#ae81ff>v2</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>labels</span>:
+</span></span><span style=display:flex><span>        <span style=color:#f92672>version</span>: <span style=color:#ae81ff>v2</span>
+</span></span></code></pre></div><h3 id=security-policies>Security Policies</h3><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-yaml data-lang=yaml><span style=display:flex><span><span style=color:#75715e># PeerAuthentication for mTLS</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>apiVersion</span>: <span style=color:#ae81ff>security.istio.io/v1beta1</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>kind</span>: <span style=color:#ae81ff>PeerAuthentication</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>metadata</span>:
+</span></span><span style=display:flex><span>  <span style=color:#f92672>name</span>: <span style=color:#ae81ff>default</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>namespace</span>: <span style=color:#ae81ff>production</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>spec</span>:
+</span></span><span style=display:flex><span>  <span style=color:#f92672>mtls</span>:
+</span></span><span style=display:flex><span>    <span style=color:#f92672>mode</span>: <span style=color:#ae81ff>STRICT</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>---
+</span></span><span style=display:flex><span><span style=color:#75715e># AuthorizationPolicy for service-to-service</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>apiVersion</span>: <span style=color:#ae81ff>security.istio.io/v1beta1</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>kind</span>: <span style=color:#ae81ff>AuthorizationPolicy</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>metadata</span>:
+</span></span><span style=display:flex><span>  <span style=color:#f92672>name</span>: <span style=color:#ae81ff>user-service-policy</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>namespace</span>: <span style=color:#ae81ff>production</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>spec</span>:
+</span></span><span style=display:flex><span>  <span style=color:#f92672>selector</span>:
+</span></span><span style=display:flex><span>    <span style=color:#f92672>matchLabels</span>:
+</span></span><span style=display:flex><span>      <span style=color:#f92672>app</span>: <span style=color:#ae81ff>user-service</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>rules</span>:
+</span></span><span style=display:flex><span>    - <span style=color:#f92672>from</span>:
+</span></span><span style=display:flex><span>        - <span style=color:#f92672>source</span>:
+</span></span><span style=display:flex><span>            <span style=color:#f92672>principals</span>:
+</span></span><span style=display:flex><span>              - <span style=color:#ae81ff>cluster.local/ns/production/sa/order-service</span>
+</span></span><span style=display:flex><span>              - <span style=color:#ae81ff>cluster.local/ns/production/sa/api-gateway</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>to</span>:
+</span></span><span style=display:flex><span>        - <span style=color:#f92672>operation</span>:
+</span></span><span style=display:flex><span>            <span style=color:#f92672>methods</span>: [<span style=color:#e6db74>&#34;GET&#34;</span>, <span style=color:#e6db74>&#34;POST&#34;</span>]
+</span></span><span style=display:flex><span>            <span style=color:#f92672>paths</span>: [<span style=color:#e6db74>&#34;/api/*&#34;</span>]
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>---
+</span></span><span style=display:flex><span><span style=color:#75715e># RequestAuthentication for JWT</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>apiVersion</span>: <span style=color:#ae81ff>security.istio.io/v1beta1</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>kind</span>: <span style=color:#ae81ff>RequestAuthentication</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>metadata</span>:
+</span></span><span style=display:flex><span>  <span style=color:#f92672>name</span>: <span style=color:#ae81ff>jwt-auth</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>namespace</span>: <span style=color:#ae81ff>production</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>spec</span>:
+</span></span><span style=display:flex><span>  <span style=color:#f92672>selector</span>:
+</span></span><span style=display:flex><span>    <span style=color:#f92672>matchLabels</span>:
+</span></span><span style=display:flex><span>      <span style=color:#f92672>app</span>: <span style=color:#ae81ff>api-gateway</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>jwtRules</span>:
+</span></span><span style=display:flex><span>    - <span style=color:#f92672>issuer</span>: <span style=color:#e6db74>&#34;https://auth.example.com&#34;</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>jwksUri</span>: <span style=color:#e6db74>&#34;https://auth.example.com/.well-known/jwks.json&#34;</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>forwardOriginalToken</span>: <span style=color:#66d9ef>true</span>
+</span></span></code></pre></div><h3 id=observability>Observability</h3><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-yaml data-lang=yaml><span style=display:flex><span><span style=color:#75715e># Telemetry configuration</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>apiVersion</span>: <span style=color:#ae81ff>telemetry.istio.io/v1alpha1</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>kind</span>: <span style=color:#ae81ff>Telemetry</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>metadata</span>:
+</span></span><span style=display:flex><span>  <span style=color:#f92672>name</span>: <span style=color:#ae81ff>mesh-telemetry</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>namespace</span>: <span style=color:#ae81ff>istio-system</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>spec</span>:
+</span></span><span style=display:flex><span>  <span style=color:#f92672>tracing</span>:
+</span></span><span style=display:flex><span>    - <span style=color:#f92672>providers</span>:
+</span></span><span style=display:flex><span>        - <span style=color:#f92672>name</span>: <span style=color:#ae81ff>jaeger</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>randomSamplingPercentage</span>: <span style=color:#ae81ff>10</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>metrics</span>:
+</span></span><span style=display:flex><span>    - <span style=color:#f92672>providers</span>:
+</span></span><span style=display:flex><span>        - <span style=color:#f92672>name</span>: <span style=color:#ae81ff>prometheus</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>overrides</span>:
+</span></span><span style=display:flex><span>        - <span style=color:#f92672>match</span>:
+</span></span><span style=display:flex><span>            <span style=color:#f92672>metric</span>: <span style=color:#ae81ff>REQUEST_COUNT</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>tagOverrides</span>:
+</span></span><span style=display:flex><span>            <span style=color:#f92672>response_code</span>:
+</span></span><span style=display:flex><span>              <span style=color:#f92672>operation</span>: <span style=color:#ae81ff>UPSERT</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>accessLogging</span>:
+</span></span><span style=display:flex><span>    - <span style=color:#f92672>providers</span>:
+</span></span><span style=display:flex><span>        - <span style=color:#f92672>name</span>: <span style=color:#ae81ff>envoy</span>
+</span></span></code></pre></div><h2 id=gateway-vs-service-mesh-comparison>Gateway vs Service Mesh Comparison</h2><table><thead><tr><th>Feature</th><th>API Gateway</th><th>Service Mesh</th><th>Combined</th></tr></thead><tbody><tr><td><strong>Traffic Management</strong></td><td>North-South</td><td>East-West</td><td>Both</td></tr><tr><td><strong>Authentication</strong></td><td>External clients</td><td>Service-to-service</td><td>End-to-end</td></tr><tr><td><strong>Rate Limiting</strong></td><td>Per-client</td><td>Per-service</td><td>Layered</td></tr><tr><td><strong>Circuit Breaking</strong></td><td>Basic</td><td>Advanced</td><td>Full</td></tr><tr><td><strong>Observability</strong></td><td>Edge metrics</td><td>Mesh-wide</td><td>Complete</td></tr><tr><td><strong>Protocol Support</strong></td><td>HTTP/REST</td><td>HTTP, gRPC, TCP</td><td>All</td></tr><tr><td><strong>Complexity</strong></td><td>Low</td><td>High</td><td>High</td></tr></tbody></table><h2 id=architecture-patterns>Architecture Patterns</h2><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-plaintext data-lang=plaintext><span style=display:flex><span>                        ┌─────────────────┐
+</span></span><span style=display:flex><span>                        │   Internet    │
+</span></span><span style=display:flex><span>                        └────────┬────────┘
+</span></span><span style=display:flex><span>                                │
+</span></span><span style=display:flex><span>                        ┌────────▼────────┐
+</span></span><span style=display:flex><span>                        │  API Gateway   │  ← North-South
+</span></span><span style=display:flex><span>                        │  (Kong/AWS)    │    Auth, Rate Limit
+</span></span><span style=display:flex><span>                        └────────┬────────┘
+</span></span><span style=display:flex><span>                                │
+</span></span><span style=display:flex><span>            ┌───────────────────┼───────────────────┐
+</span></span><span style=display:flex><span>            │                   │                   │
+</span></span><span style=display:flex><span>    ┌───────▼───────┐ ┌───────▼───────┐ ┌───────▼───────┐
+</span></span><span style=display:flex><span>    │ User Service  │ │Order Service  │ │Product Service│
+</span></span><span style=display:flex><span>    │ ┌──────────┐ │ │ ┌──────────┐ │ │ ┌──────────┐ │
+</span></span><span style=display:flex><span>    │ │  Envoy   │ │ │ │  Envoy   │ │ │ │  Envoy   │ │
+</span></span><span style=display:flex><span>    │ │  Sidecar │ │ │ │  Sidecar │ │ │ │  Sidecar │ │
+</span></span><span style=display:flex><span>    │ └──────────┘ │ │ └──────────┘ │ │ └──────────┘ │
+</span></span><span style=display:flex><span>    └───────────────┘ └───────────────┘ └───────────────┘
+</span></span><span style=display:flex><span>            │                   │                   │
+</span></span><span style=display:flex><span>            └───────────────────┼───────────────────┘
+</span></span><span style=display:flex><span>                                │  ← East-West (Service Mesh)
+</span></span><span style=display:flex><span>                        ┌────────▼────────┐     mTLS, Tracing
+</span></span><span style=display:flex><span>                        │  Istio Control │
+</span></span><span style=display:flex><span>                        │     Plane      │
+</span></span><span style=display:flex><span>                        └─────────────────┘
+</span></span></code></pre></div><h2 id=best-practices>Best Practices</h2><ol><li><strong>Use Both</strong>: API Gateway for edge, Service Mesh for internal</li><li><strong>Implement mTLS</strong>: Encrypt all service-to-service communication</li><li><strong>Centralize Observability</strong>: Unified logging, metrics, and tracing</li><li><strong>Version APIs</strong>: Support multiple versions during migrations</li><li><strong>Test Failover</strong>: Regularly test circuit breakers and retries</li><li><strong>Start Simple</strong>: Add complexity only when needed</li></ol></div><footer class=article-footer><a href=/portfolio/articles/backend/05-system-design/ class=back-link>← Back to System Design & Architecture</a></footer></article></main><footer class=site-footer><p>&copy; 2026 YuHan Jhou. All rights reserved.</p></footer></div></div><script src=https://yu-codes.github.io/portfolio/js/theme.js defer></script><script src=https://yu-codes.github.io/portfolio/js/roadmap.js defer></script><script src=https://yu-codes.github.io/portfolio/js/parallax.js defer></script><script src=https://yu-codes.github.io/portfolio/js/page-transition.js defer></script></body></html>

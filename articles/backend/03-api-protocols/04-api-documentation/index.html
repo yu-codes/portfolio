@@ -1,0 +1,366 @@
+<!doctype html><html lang=en class=html><head><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><title>API Documentation & Standards - Yu's Portfolio & Learning Hub</title><meta name=description content='Well-documented APIs improve developer experience, reduce support burden, and accelerate integration.
+OpenAPI Specification Complete API Definition # openapi.yaml openapi: 3.1.0 info: title: User Management API description: RESTful API for user management operations version: 1.0.0 contact: name: API Support email: api@example.com license: name: MIT url: https://opensource.org/licenses/MIT servers: - url: https://api.example.com/v1 description: Production - url: https://staging-api.example.com/v1 description: Staging - url: http://localhost:8000/v1 description: Development tags: - name: users description: User management operations - name: auth description: Authentication endpoints paths: /users: get: summary: List all users description: Retrieve a paginated list of users with optional filtering operationId: listUsers tags: [users] security: - bearerAuth: [] parameters: - $ref: &#39;#/components/parameters/PageSize&#39; - $ref: &#39;#/components/parameters/PageToken&#39; - name: status in: query schema: type: string enum: [active, inactive, pending] responses: &#39;200&#39;: description: Successful response content: application/json: schema: $ref: &#39;#/components/schemas/UserListResponse&#39; &#39;401&#39;: $ref: &#39;#/components/responses/Unauthorized&#39; post: summary: Create a user operationId: createUser tags: [users] security: - bearerAuth: [] requestBody: required: true content: application/json: schema: $ref: &#39;#/components/schemas/CreateUserRequest&#39; examples: basic: summary: Basic user value: name: John Doe email: john@example.com responses: &#39;201&#39;: description: User created content: application/json: schema: $ref: &#39;#/components/schemas/User&#39; &#39;400&#39;: $ref: &#39;#/components/responses/BadRequest&#39; &#39;409&#39;: description: Email already exists /users/{userId}: get: summary: Get user by ID operationId: getUser tags: [users] parameters: - $ref: &#39;#/components/parameters/UserId&#39; responses: &#39;200&#39;: description: Successful response content: application/json: schema: $ref: &#39;#/components/schemas/User&#39; &#39;404&#39;: $ref: &#39;#/components/responses/NotFound&#39; components: securitySchemes: bearerAuth: type: http scheme: bearer bearerFormat: JWT apiKey: type: apiKey in: header name: X-API-Key parameters: UserId: name: userId in: path required: true schema: type: string format: uuid description: Unique user identifier PageSize: name: pageSize in: query schema: type: integer minimum: 1 maximum: 100 default: 20 PageToken: name: pageToken in: query schema: type: string schemas: User: type: object required: [id, name, email, createdAt] properties: id: type: string format: uuid example: "550e8400-e29b-41d4-a716-446655440000" name: type: string minLength: 1 maxLength: 100 example: "John Doe" email: type: string format: email example: "john@example.com" status: type: string enum: [active, inactive, pending] default: pending createdAt: type: string format: date-time CreateUserRequest: type: object required: [name, email] properties: name: type: string minLength: 1 maxLength: 100 email: type: string format: email UserListResponse: type: object properties: items: type: array items: $ref: &#39;#/components/schemas/User&#39; nextPageToken: type: string nullable: true totalCount: type: integer responses: BadRequest: description: Invalid request content: application/json: schema: $ref: &#39;#/components/schemas/Error&#39; Unauthorized: description: Authentication required content: application/json: schema: $ref: &#39;#/components/schemas/Error&#39; NotFound: description: Resource not found content: application/json: schema: $ref: &#39;#/components/schemas/Error&#39; Error: type: object properties: code: type: string message: type: string details: type: object FastAPI Auto-Documentation from fastapi import FastAPI, Query, Path, Body from pydantic import BaseModel, Field, EmailStr from typing import Annotated from enum import Enum class UserStatus(str, Enum): active = "active" inactive = "inactive" pending = "pending" class CreateUserRequest(BaseModel): """Request body for creating a new user.""" name: str = Field( ..., min_length=1, max_length=100, description="User&#39;s full name", examples=["John Doe"] ) email: EmailStr = Field( ..., description="User&#39;s email address", examples=["john@example.com"] ) model_config = { "json_schema_extra": { "examples": [ { "name": "John Doe", "email": "john@example.com" } ] } } class UserResponse(BaseModel): """User resource representation.""" id: str = Field(..., description="Unique user identifier") name: str = Field(..., description="User&#39;s full name") email: str = Field(..., description="User&#39;s email address") status: UserStatus = Field(default=UserStatus.pending) app = FastAPI( title="User Management API", description="RESTful API for user management", version="1.0.0", docs_url="/docs", redoc_url="/redoc", openapi_url="/openapi.json" ) @app.get( "/users", response_model=list[UserResponse], summary="List all users", description="Retrieve a paginated list of users", tags=["users"] ) async def list_users( status: Annotated[ UserStatus | None, Query(description="Filter by user status") ] = None, page_size: Annotated[ int, Query(ge=1, le=100, description="Number of items per page") ] = 20, page_token: Annotated[ str | None, Query(description="Pagination token") ] = None ): """List users with optional filtering and pagination.""" pass @app.post( "/users", response_model=UserResponse, status_code=201, summary="Create a user", tags=["users"], responses={ 409: {"description": "Email already exists"} } ) async def create_user( user: Annotated[CreateUserRequest, Body(...)] ): """Create a new user with the provided information.""" pass Documentation Tools Comparison Tool Format Interactive Code Gen Best For Swagger UI OpenAPI Yes Yes REST APIs ReDoc OpenAPI Limited No Documentation Postman Collection Yes Yes Testing GraphQL Playground GraphQL Yes No GraphQL APIs gRPC-Gateway Proto No Yes gRPC APIs Documentation Best Practices # Include comprehensive error responses @app.post("/users", responses={ 201: {"description": "User created successfully"}, 400: {"description": "Invalid input data", "model": ErrorResponse}, 401: {"description": "Authentication required"}, 403: {"description": "Insufficient permissions"}, 409: {"description": "Email already exists"}, 422: {"description": "Validation error", "model": ValidationError}, 500: {"description": "Internal server error"} }) async def create_user(user: CreateUserRequest): pass # Add request/response examples class OrderRequest(BaseModel): model_config = { "json_schema_extra": { "examples": [ { "product_id": "prod_123", "quantity": 2, "shipping_address": { "street": "123 Main St", "city": "San Francisco" } } ] } } Best Practices Version Your Docs: Keep documentation in sync with API versions Include Examples: Provide realistic request/response examples Document Errors: List all possible error codes and their meanings Use Consistent Naming: Follow naming conventions throughout Keep Updated: Automate documentation generation from code Test Examples: Ensure all examples are valid and working '><meta property="og:title" content="API Documentation & Standards"><meta property="og:description" content='Well-documented APIs improve developer experience, reduce support burden, and accelerate integration.
+OpenAPI Specification Complete API Definition # openapi.yaml openapi: 3.1.0 info: title: User Management API description: RESTful API for user management operations version: 1.0.0 contact: name: API Support email: api@example.com license: name: MIT url: https://opensource.org/licenses/MIT servers: - url: https://api.example.com/v1 description: Production - url: https://staging-api.example.com/v1 description: Staging - url: http://localhost:8000/v1 description: Development tags: - name: users description: User management operations - name: auth description: Authentication endpoints paths: /users: get: summary: List all users description: Retrieve a paginated list of users with optional filtering operationId: listUsers tags: [users] security: - bearerAuth: [] parameters: - $ref: &#39;#/components/parameters/PageSize&#39; - $ref: &#39;#/components/parameters/PageToken&#39; - name: status in: query schema: type: string enum: [active, inactive, pending] responses: &#39;200&#39;: description: Successful response content: application/json: schema: $ref: &#39;#/components/schemas/UserListResponse&#39; &#39;401&#39;: $ref: &#39;#/components/responses/Unauthorized&#39; post: summary: Create a user operationId: createUser tags: [users] security: - bearerAuth: [] requestBody: required: true content: application/json: schema: $ref: &#39;#/components/schemas/CreateUserRequest&#39; examples: basic: summary: Basic user value: name: John Doe email: john@example.com responses: &#39;201&#39;: description: User created content: application/json: schema: $ref: &#39;#/components/schemas/User&#39; &#39;400&#39;: $ref: &#39;#/components/responses/BadRequest&#39; &#39;409&#39;: description: Email already exists /users/{userId}: get: summary: Get user by ID operationId: getUser tags: [users] parameters: - $ref: &#39;#/components/parameters/UserId&#39; responses: &#39;200&#39;: description: Successful response content: application/json: schema: $ref: &#39;#/components/schemas/User&#39; &#39;404&#39;: $ref: &#39;#/components/responses/NotFound&#39; components: securitySchemes: bearerAuth: type: http scheme: bearer bearerFormat: JWT apiKey: type: apiKey in: header name: X-API-Key parameters: UserId: name: userId in: path required: true schema: type: string format: uuid description: Unique user identifier PageSize: name: pageSize in: query schema: type: integer minimum: 1 maximum: 100 default: 20 PageToken: name: pageToken in: query schema: type: string schemas: User: type: object required: [id, name, email, createdAt] properties: id: type: string format: uuid example: "550e8400-e29b-41d4-a716-446655440000" name: type: string minLength: 1 maxLength: 100 example: "John Doe" email: type: string format: email example: "john@example.com" status: type: string enum: [active, inactive, pending] default: pending createdAt: type: string format: date-time CreateUserRequest: type: object required: [name, email] properties: name: type: string minLength: 1 maxLength: 100 email: type: string format: email UserListResponse: type: object properties: items: type: array items: $ref: &#39;#/components/schemas/User&#39; nextPageToken: type: string nullable: true totalCount: type: integer responses: BadRequest: description: Invalid request content: application/json: schema: $ref: &#39;#/components/schemas/Error&#39; Unauthorized: description: Authentication required content: application/json: schema: $ref: &#39;#/components/schemas/Error&#39; NotFound: description: Resource not found content: application/json: schema: $ref: &#39;#/components/schemas/Error&#39; Error: type: object properties: code: type: string message: type: string details: type: object FastAPI Auto-Documentation from fastapi import FastAPI, Query, Path, Body from pydantic import BaseModel, Field, EmailStr from typing import Annotated from enum import Enum class UserStatus(str, Enum): active = "active" inactive = "inactive" pending = "pending" class CreateUserRequest(BaseModel): """Request body for creating a new user.""" name: str = Field( ..., min_length=1, max_length=100, description="User&#39;s full name", examples=["John Doe"] ) email: EmailStr = Field( ..., description="User&#39;s email address", examples=["john@example.com"] ) model_config = { "json_schema_extra": { "examples": [ { "name": "John Doe", "email": "john@example.com" } ] } } class UserResponse(BaseModel): """User resource representation.""" id: str = Field(..., description="Unique user identifier") name: str = Field(..., description="User&#39;s full name") email: str = Field(..., description="User&#39;s email address") status: UserStatus = Field(default=UserStatus.pending) app = FastAPI( title="User Management API", description="RESTful API for user management", version="1.0.0", docs_url="/docs", redoc_url="/redoc", openapi_url="/openapi.json" ) @app.get( "/users", response_model=list[UserResponse], summary="List all users", description="Retrieve a paginated list of users", tags=["users"] ) async def list_users( status: Annotated[ UserStatus | None, Query(description="Filter by user status") ] = None, page_size: Annotated[ int, Query(ge=1, le=100, description="Number of items per page") ] = 20, page_token: Annotated[ str | None, Query(description="Pagination token") ] = None ): """List users with optional filtering and pagination.""" pass @app.post( "/users", response_model=UserResponse, status_code=201, summary="Create a user", tags=["users"], responses={ 409: {"description": "Email already exists"} } ) async def create_user( user: Annotated[CreateUserRequest, Body(...)] ): """Create a new user with the provided information.""" pass Documentation Tools Comparison Tool Format Interactive Code Gen Best For Swagger UI OpenAPI Yes Yes REST APIs ReDoc OpenAPI Limited No Documentation Postman Collection Yes Yes Testing GraphQL Playground GraphQL Yes No GraphQL APIs gRPC-Gateway Proto No Yes gRPC APIs Documentation Best Practices # Include comprehensive error responses @app.post("/users", responses={ 201: {"description": "User created successfully"}, 400: {"description": "Invalid input data", "model": ErrorResponse}, 401: {"description": "Authentication required"}, 403: {"description": "Insufficient permissions"}, 409: {"description": "Email already exists"}, 422: {"description": "Validation error", "model": ValidationError}, 500: {"description": "Internal server error"} }) async def create_user(user: CreateUserRequest): pass # Add request/response examples class OrderRequest(BaseModel): model_config = { "json_schema_extra": { "examples": [ { "product_id": "prod_123", "quantity": 2, "shipping_address": { "street": "123 Main St", "city": "San Francisco" } } ] } } Best Practices Version Your Docs: Keep documentation in sync with API versions Include Examples: Provide realistic request/response examples Document Errors: List all possible error codes and their meanings Use Consistent Naming: Follow naming conventions throughout Keep Updated: Automate documentation generation from code Test Examples: Ensure all examples are valid and working '><meta property="og:url" content="https://yu-codes.github.io/portfolio/articles/backend/03-api-protocols/04-api-documentation/"><link rel=canonical href=https://yu-codes.github.io/portfolio/articles/backend/03-api-protocols/04-api-documentation/><link rel=stylesheet href=https://yu-codes.github.io/portfolio/css/main.css></head><body class=body><div class=container><aside class=sidebar><div class=sidebar-header><h1 class=name>Yu</h1><p class=tagline>Developer, dreamer, debugger.</p></div><nav class=sidebar-nav><a href=https://yu-codes.github.io/portfolio/ class=nav-item><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+<span>HOME</span>
+</a><a href=https://yu-codes.github.io/portfolio/articles/ class="nav-item active"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5.0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5.0 014 19.5v-15A2.5 2.5.0 016.5 2z"/></svg>
+<span>ARTICLES</span>
+</a><a href=https://yu-codes.github.io/portfolio/resume/ class=nav-item><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6A2 2 0 004 4v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+<span>RESUME</span>
+</a><a href=https://yu-codes.github.io/portfolio/projects/ class=nav-item><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8"/><rect x="13" y="3" width="8" height="8"/><rect x="3" y="13" width="8" height="8"/><rect x="13" y="13" width="8" height="8"/></svg>
+<span>PROJECTS</span>
+</a><a href=https://yu-codes.github.io/portfolio/archives/ class=nav-item><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+<span>ARCHIVES</span></a></nav><div class=sidebar-footer><div class=controls><button class="control-btn theme-toggle" title="Toggle theme (light/dark)" aria-label="Toggle theme">
+<svg class="icon-sun" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M12 3a9 9 0 010 18" fill="currentColor" opacity=".9"/><path d="M12 3a9 9 0 000 18" fill="currentColor" opacity=".25"/></svg>
+<svg class="icon-moon" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M12 3a9 9 0 000 18" fill="currentColor" opacity=".9"/><path d="M12 3a9 9 0 010 18" fill="currentColor" opacity=".25"/></svg>
+</button>
+<button class="control-btn lang-toggle" title="Toggle language" aria-label="Toggle language">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3.0 014 10 15.3 15.3.0 01-4 10A15.3 15.3.0 018 12a15.3 15.3.0 014-10z"/></svg></button></div><div class=social-links><a href=https://github.com/yu-codes target=_blank rel="noopener noreferrer" class=social-link title=GitHub><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.374.0.0 5.373.0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931.0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176.0.0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221.0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/></svg>
+</a><a href=mailto:dylan.jhou1120@gmail.com class=social-link title=Email><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1.0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1.0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></a></div></div></aside><div class=main-content><div class=topbar><div class=breadcrumb><a href=https://yu-codes.github.io/portfolio/>HOME</a>
+<span class=separator>&#8250;</span>
+<a href=https://yu-codes.github.io/portfolio/articles/>ARTICLES</a>
+<span class=separator>&#8250;</span>
+<a href=https://yu-codes.github.io/portfolio/articles/backend/>Backend Engineering</a><span class=separator>&#8250;</span>
+<a href=https://yu-codes.github.io/portfolio/articles/backend/03-api-protocols/>API & Protocols</a><span class=separator>&#8250;</span>
+<span>API Documentation & Standards</span></div></div><main class=content-area><article class=article-content><header class=article-header><h1>API Documentation & Standards</h1><div class=article-meta><span class=article-description>Creating comprehensive API documentation with OpenAPI/Swagger specifications.</span></div></header><nav class=article-toc><h2 class=toc-title>Table of Contents</h2><nav id=TableOfContents><ul><li><a href=#openapi-specification>OpenAPI Specification</a><ul><li><a href=#complete-api-definition>Complete API Definition</a></li></ul></li><li><a href=#fastapi-auto-documentation>FastAPI Auto-Documentation</a></li><li><a href=#documentation-tools-comparison>Documentation Tools Comparison</a></li><li><a href=#documentation-best-practices>Documentation Best Practices</a></li><li><a href=#best-practices>Best Practices</a></li></ul></nav></nav><div class=article-body><p>Well-documented APIs improve developer experience, reduce support burden, and accelerate integration.</p><h2 id=openapi-specification>OpenAPI Specification</h2><h3 id=complete-api-definition>Complete API Definition</h3><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-yaml data-lang=yaml><span style=display:flex><span><span style=color:#75715e># openapi.yaml</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>openapi</span>: <span style=color:#ae81ff>3.1.0</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>info</span>:
+</span></span><span style=display:flex><span>  <span style=color:#f92672>title</span>: <span style=color:#ae81ff>User Management API</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>description</span>: <span style=color:#ae81ff>RESTful API for user management operations</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>version</span>: <span style=color:#ae81ff>1.0.0</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>contact</span>:
+</span></span><span style=display:flex><span>    <span style=color:#f92672>name</span>: <span style=color:#ae81ff>API Support</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>email</span>: <span style=color:#ae81ff>api@example.com</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>license</span>:
+</span></span><span style=display:flex><span>    <span style=color:#f92672>name</span>: <span style=color:#ae81ff>MIT</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>url</span>: <span style=color:#ae81ff>https://opensource.org/licenses/MIT</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#f92672>servers</span>:
+</span></span><span style=display:flex><span>  - <span style=color:#f92672>url</span>: <span style=color:#ae81ff>https://api.example.com/v1</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>description</span>: <span style=color:#ae81ff>Production</span>
+</span></span><span style=display:flex><span>  - <span style=color:#f92672>url</span>: <span style=color:#ae81ff>https://staging-api.example.com/v1</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>description</span>: <span style=color:#ae81ff>Staging</span>
+</span></span><span style=display:flex><span>  - <span style=color:#f92672>url</span>: <span style=color:#ae81ff>http://localhost:8000/v1</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>description</span>: <span style=color:#ae81ff>Development</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#f92672>tags</span>:
+</span></span><span style=display:flex><span>  - <span style=color:#f92672>name</span>: <span style=color:#ae81ff>users</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>description</span>: <span style=color:#ae81ff>User management operations</span>
+</span></span><span style=display:flex><span>  - <span style=color:#f92672>name</span>: <span style=color:#ae81ff>auth</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>description</span>: <span style=color:#ae81ff>Authentication endpoints</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#f92672>paths</span>:
+</span></span><span style=display:flex><span>  <span style=color:#f92672>/users</span>:
+</span></span><span style=display:flex><span>    <span style=color:#f92672>get</span>:
+</span></span><span style=display:flex><span>      <span style=color:#f92672>summary</span>: <span style=color:#ae81ff>List all users</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>description</span>: <span style=color:#ae81ff>Retrieve a paginated list of users with optional filtering</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>operationId</span>: <span style=color:#ae81ff>listUsers</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>tags</span>: [<span style=color:#ae81ff>users]</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>security</span>:
+</span></span><span style=display:flex><span>        - <span style=color:#f92672>bearerAuth</span>: []
+</span></span><span style=display:flex><span>      <span style=color:#f92672>parameters</span>:
+</span></span><span style=display:flex><span>        - <span style=color:#f92672>$ref</span>: <span style=color:#e6db74>&#39;#/components/parameters/PageSize&#39;</span>
+</span></span><span style=display:flex><span>        - <span style=color:#f92672>$ref</span>: <span style=color:#e6db74>&#39;#/components/parameters/PageToken&#39;</span>
+</span></span><span style=display:flex><span>        - <span style=color:#f92672>name</span>: <span style=color:#ae81ff>status</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>in</span>: <span style=color:#ae81ff>query</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>schema</span>:
+</span></span><span style=display:flex><span>            <span style=color:#f92672>type</span>: <span style=color:#ae81ff>string</span>
+</span></span><span style=display:flex><span>            <span style=color:#f92672>enum</span>: [<span style=color:#ae81ff>active, inactive, pending]</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>responses</span>:
+</span></span><span style=display:flex><span>        <span style=color:#f92672>&#39;200&#39;</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>description</span>: <span style=color:#ae81ff>Successful response</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>content</span>:
+</span></span><span style=display:flex><span>            <span style=color:#f92672>application/json</span>:
+</span></span><span style=display:flex><span>              <span style=color:#f92672>schema</span>:
+</span></span><span style=display:flex><span>                <span style=color:#f92672>$ref</span>: <span style=color:#e6db74>&#39;#/components/schemas/UserListResponse&#39;</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>&#39;401&#39;</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>$ref</span>: <span style=color:#e6db74>&#39;#/components/responses/Unauthorized&#39;</span>
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#f92672>post</span>:
+</span></span><span style=display:flex><span>      <span style=color:#f92672>summary</span>: <span style=color:#ae81ff>Create a user</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>operationId</span>: <span style=color:#ae81ff>createUser</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>tags</span>: [<span style=color:#ae81ff>users]</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>security</span>:
+</span></span><span style=display:flex><span>        - <span style=color:#f92672>bearerAuth</span>: []
+</span></span><span style=display:flex><span>      <span style=color:#f92672>requestBody</span>:
+</span></span><span style=display:flex><span>        <span style=color:#f92672>required</span>: <span style=color:#66d9ef>true</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>content</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>application/json</span>:
+</span></span><span style=display:flex><span>            <span style=color:#f92672>schema</span>:
+</span></span><span style=display:flex><span>              <span style=color:#f92672>$ref</span>: <span style=color:#e6db74>&#39;#/components/schemas/CreateUserRequest&#39;</span>
+</span></span><span style=display:flex><span>            <span style=color:#f92672>examples</span>:
+</span></span><span style=display:flex><span>              <span style=color:#f92672>basic</span>:
+</span></span><span style=display:flex><span>                <span style=color:#f92672>summary</span>: <span style=color:#ae81ff>Basic user</span>
+</span></span><span style=display:flex><span>                <span style=color:#f92672>value</span>:
+</span></span><span style=display:flex><span>                  <span style=color:#f92672>name</span>: <span style=color:#ae81ff>John Doe</span>
+</span></span><span style=display:flex><span>                  <span style=color:#f92672>email</span>: <span style=color:#ae81ff>john@example.com</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>responses</span>:
+</span></span><span style=display:flex><span>        <span style=color:#f92672>&#39;201&#39;</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>description</span>: <span style=color:#ae81ff>User created</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>content</span>:
+</span></span><span style=display:flex><span>            <span style=color:#f92672>application/json</span>:
+</span></span><span style=display:flex><span>              <span style=color:#f92672>schema</span>:
+</span></span><span style=display:flex><span>                <span style=color:#f92672>$ref</span>: <span style=color:#e6db74>&#39;#/components/schemas/User&#39;</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>&#39;400&#39;</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>$ref</span>: <span style=color:#e6db74>&#39;#/components/responses/BadRequest&#39;</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>&#39;409&#39;</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>description</span>: <span style=color:#ae81ff>Email already exists</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#ae81ff>/users/{userId}:</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>get</span>:
+</span></span><span style=display:flex><span>      <span style=color:#f92672>summary</span>: <span style=color:#ae81ff>Get user by ID</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>operationId</span>: <span style=color:#ae81ff>getUser</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>tags</span>: [<span style=color:#ae81ff>users]</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>parameters</span>:
+</span></span><span style=display:flex><span>        - <span style=color:#f92672>$ref</span>: <span style=color:#e6db74>&#39;#/components/parameters/UserId&#39;</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>responses</span>:
+</span></span><span style=display:flex><span>        <span style=color:#f92672>&#39;200&#39;</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>description</span>: <span style=color:#ae81ff>Successful response</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>content</span>:
+</span></span><span style=display:flex><span>            <span style=color:#f92672>application/json</span>:
+</span></span><span style=display:flex><span>              <span style=color:#f92672>schema</span>:
+</span></span><span style=display:flex><span>                <span style=color:#f92672>$ref</span>: <span style=color:#e6db74>&#39;#/components/schemas/User&#39;</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>&#39;404&#39;</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>$ref</span>: <span style=color:#e6db74>&#39;#/components/responses/NotFound&#39;</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#f92672>components</span>:
+</span></span><span style=display:flex><span>  <span style=color:#f92672>securitySchemes</span>:
+</span></span><span style=display:flex><span>    <span style=color:#f92672>bearerAuth</span>:
+</span></span><span style=display:flex><span>      <span style=color:#f92672>type</span>: <span style=color:#ae81ff>http</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>scheme</span>: <span style=color:#ae81ff>bearer</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>bearerFormat</span>: <span style=color:#ae81ff>JWT</span>
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#f92672>apiKey</span>:
+</span></span><span style=display:flex><span>      <span style=color:#f92672>type</span>: <span style=color:#ae81ff>apiKey</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>in</span>: <span style=color:#ae81ff>header</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>name</span>: <span style=color:#ae81ff>X-API-Key</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>parameters</span>:
+</span></span><span style=display:flex><span>    <span style=color:#f92672>UserId</span>:
+</span></span><span style=display:flex><span>      <span style=color:#f92672>name</span>: <span style=color:#ae81ff>userId</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>in</span>: <span style=color:#ae81ff>path</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>required</span>: <span style=color:#66d9ef>true</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>schema</span>:
+</span></span><span style=display:flex><span>        <span style=color:#f92672>type</span>: <span style=color:#ae81ff>string</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>format</span>: <span style=color:#ae81ff>uuid</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>description</span>: <span style=color:#ae81ff>Unique user identifier</span>
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#f92672>PageSize</span>:
+</span></span><span style=display:flex><span>      <span style=color:#f92672>name</span>: <span style=color:#ae81ff>pageSize</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>in</span>: <span style=color:#ae81ff>query</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>schema</span>:
+</span></span><span style=display:flex><span>        <span style=color:#f92672>type</span>: <span style=color:#ae81ff>integer</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>minimum</span>: <span style=color:#ae81ff>1</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>maximum</span>: <span style=color:#ae81ff>100</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>default</span>: <span style=color:#ae81ff>20</span>
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#f92672>PageToken</span>:
+</span></span><span style=display:flex><span>      <span style=color:#f92672>name</span>: <span style=color:#ae81ff>pageToken</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>in</span>: <span style=color:#ae81ff>query</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>schema</span>:
+</span></span><span style=display:flex><span>        <span style=color:#f92672>type</span>: <span style=color:#ae81ff>string</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>schemas</span>:
+</span></span><span style=display:flex><span>    <span style=color:#f92672>User</span>:
+</span></span><span style=display:flex><span>      <span style=color:#f92672>type</span>: <span style=color:#ae81ff>object</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>required</span>: [<span style=color:#ae81ff>id, name, email, createdAt]</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>properties</span>:
+</span></span><span style=display:flex><span>        <span style=color:#f92672>id</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>type</span>: <span style=color:#ae81ff>string</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>format</span>: <span style=color:#ae81ff>uuid</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>example</span>: <span style=color:#e6db74>&#34;550e8400-e29b-41d4-a716-446655440000&#34;</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>name</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>type</span>: <span style=color:#ae81ff>string</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>minLength</span>: <span style=color:#ae81ff>1</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>maxLength</span>: <span style=color:#ae81ff>100</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>example</span>: <span style=color:#e6db74>&#34;John Doe&#34;</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>email</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>type</span>: <span style=color:#ae81ff>string</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>format</span>: <span style=color:#ae81ff>email</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>example</span>: <span style=color:#e6db74>&#34;john@example.com&#34;</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>status</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>type</span>: <span style=color:#ae81ff>string</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>enum</span>: [<span style=color:#ae81ff>active, inactive, pending]</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>default</span>: <span style=color:#ae81ff>pending</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>createdAt</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>type</span>: <span style=color:#ae81ff>string</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>format</span>: <span style=color:#ae81ff>date-time</span>
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#f92672>CreateUserRequest</span>:
+</span></span><span style=display:flex><span>      <span style=color:#f92672>type</span>: <span style=color:#ae81ff>object</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>required</span>: [<span style=color:#ae81ff>name, email]</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>properties</span>:
+</span></span><span style=display:flex><span>        <span style=color:#f92672>name</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>type</span>: <span style=color:#ae81ff>string</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>minLength</span>: <span style=color:#ae81ff>1</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>maxLength</span>: <span style=color:#ae81ff>100</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>email</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>type</span>: <span style=color:#ae81ff>string</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>format</span>: <span style=color:#ae81ff>email</span>
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#f92672>UserListResponse</span>:
+</span></span><span style=display:flex><span>      <span style=color:#f92672>type</span>: <span style=color:#ae81ff>object</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>properties</span>:
+</span></span><span style=display:flex><span>        <span style=color:#f92672>items</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>type</span>: <span style=color:#ae81ff>array</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>items</span>:
+</span></span><span style=display:flex><span>            <span style=color:#f92672>$ref</span>: <span style=color:#e6db74>&#39;#/components/schemas/User&#39;</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>nextPageToken</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>type</span>: <span style=color:#ae81ff>string</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>nullable</span>: <span style=color:#66d9ef>true</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>totalCount</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>type</span>: <span style=color:#ae81ff>integer</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>responses</span>:
+</span></span><span style=display:flex><span>    <span style=color:#f92672>BadRequest</span>:
+</span></span><span style=display:flex><span>      <span style=color:#f92672>description</span>: <span style=color:#ae81ff>Invalid request</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>content</span>:
+</span></span><span style=display:flex><span>        <span style=color:#f92672>application/json</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>schema</span>:
+</span></span><span style=display:flex><span>            <span style=color:#f92672>$ref</span>: <span style=color:#e6db74>&#39;#/components/schemas/Error&#39;</span>
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#f92672>Unauthorized</span>:
+</span></span><span style=display:flex><span>      <span style=color:#f92672>description</span>: <span style=color:#ae81ff>Authentication required</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>content</span>:
+</span></span><span style=display:flex><span>        <span style=color:#f92672>application/json</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>schema</span>:
+</span></span><span style=display:flex><span>            <span style=color:#f92672>$ref</span>: <span style=color:#e6db74>&#39;#/components/schemas/Error&#39;</span>
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#f92672>NotFound</span>:
+</span></span><span style=display:flex><span>      <span style=color:#f92672>description</span>: <span style=color:#ae81ff>Resource not found</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>content</span>:
+</span></span><span style=display:flex><span>        <span style=color:#f92672>application/json</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>schema</span>:
+</span></span><span style=display:flex><span>            <span style=color:#f92672>$ref</span>: <span style=color:#e6db74>&#39;#/components/schemas/Error&#39;</span>
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    <span style=color:#f92672>Error</span>:
+</span></span><span style=display:flex><span>      <span style=color:#f92672>type</span>: <span style=color:#ae81ff>object</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>properties</span>:
+</span></span><span style=display:flex><span>        <span style=color:#f92672>code</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>type</span>: <span style=color:#ae81ff>string</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>message</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>type</span>: <span style=color:#ae81ff>string</span>
+</span></span><span style=display:flex><span>        <span style=color:#f92672>details</span>:
+</span></span><span style=display:flex><span>          <span style=color:#f92672>type</span>: <span style=color:#ae81ff>object</span>
+</span></span></code></pre></div><h2 id=fastapi-auto-documentation>FastAPI Auto-Documentation</h2><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-python data-lang=python><span style=display:flex><span><span style=color:#f92672>from</span> fastapi <span style=color:#f92672>import</span> FastAPI, Query, Path, Body
+</span></span><span style=display:flex><span><span style=color:#f92672>from</span> pydantic <span style=color:#f92672>import</span> BaseModel, Field, EmailStr
+</span></span><span style=display:flex><span><span style=color:#f92672>from</span> typing <span style=color:#f92672>import</span> Annotated
+</span></span><span style=display:flex><span><span style=color:#f92672>from</span> enum <span style=color:#f92672>import</span> Enum
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>UserStatus</span>(str, Enum):
+</span></span><span style=display:flex><span>    active <span style=color:#f92672>=</span> <span style=color:#e6db74>&#34;active&#34;</span>
+</span></span><span style=display:flex><span>    inactive <span style=color:#f92672>=</span> <span style=color:#e6db74>&#34;inactive&#34;</span>
+</span></span><span style=display:flex><span>    pending <span style=color:#f92672>=</span> <span style=color:#e6db74>&#34;pending&#34;</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>CreateUserRequest</span>(BaseModel):
+</span></span><span style=display:flex><span>    <span style=color:#e6db74>&#34;&#34;&#34;Request body for creating a new user.&#34;&#34;&#34;</span>
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    name: str <span style=color:#f92672>=</span> Field(
+</span></span><span style=display:flex><span>        <span style=color:#f92672>...</span>,
+</span></span><span style=display:flex><span>        min_length<span style=color:#f92672>=</span><span style=color:#ae81ff>1</span>,
+</span></span><span style=display:flex><span>        max_length<span style=color:#f92672>=</span><span style=color:#ae81ff>100</span>,
+</span></span><span style=display:flex><span>        description<span style=color:#f92672>=</span><span style=color:#e6db74>&#34;User&#39;s full name&#34;</span>,
+</span></span><span style=display:flex><span>        examples<span style=color:#f92672>=</span>[<span style=color:#e6db74>&#34;John Doe&#34;</span>]
+</span></span><span style=display:flex><span>    )
+</span></span><span style=display:flex><span>    email: EmailStr <span style=color:#f92672>=</span> Field(
+</span></span><span style=display:flex><span>        <span style=color:#f92672>...</span>,
+</span></span><span style=display:flex><span>        description<span style=color:#f92672>=</span><span style=color:#e6db74>&#34;User&#39;s email address&#34;</span>,
+</span></span><span style=display:flex><span>        examples<span style=color:#f92672>=</span>[<span style=color:#e6db74>&#34;john@example.com&#34;</span>]
+</span></span><span style=display:flex><span>    )
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    model_config <span style=color:#f92672>=</span> {
+</span></span><span style=display:flex><span>        <span style=color:#e6db74>&#34;json_schema_extra&#34;</span>: {
+</span></span><span style=display:flex><span>            <span style=color:#e6db74>&#34;examples&#34;</span>: [
+</span></span><span style=display:flex><span>                {
+</span></span><span style=display:flex><span>                    <span style=color:#e6db74>&#34;name&#34;</span>: <span style=color:#e6db74>&#34;John Doe&#34;</span>,
+</span></span><span style=display:flex><span>                    <span style=color:#e6db74>&#34;email&#34;</span>: <span style=color:#e6db74>&#34;john@example.com&#34;</span>
+</span></span><span style=display:flex><span>                }
+</span></span><span style=display:flex><span>            ]
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>UserResponse</span>(BaseModel):
+</span></span><span style=display:flex><span>    <span style=color:#e6db74>&#34;&#34;&#34;User resource representation.&#34;&#34;&#34;</span>
+</span></span><span style=display:flex><span>    
+</span></span><span style=display:flex><span>    id: str <span style=color:#f92672>=</span> Field(<span style=color:#f92672>...</span>, description<span style=color:#f92672>=</span><span style=color:#e6db74>&#34;Unique user identifier&#34;</span>)
+</span></span><span style=display:flex><span>    name: str <span style=color:#f92672>=</span> Field(<span style=color:#f92672>...</span>, description<span style=color:#f92672>=</span><span style=color:#e6db74>&#34;User&#39;s full name&#34;</span>)
+</span></span><span style=display:flex><span>    email: str <span style=color:#f92672>=</span> Field(<span style=color:#f92672>...</span>, description<span style=color:#f92672>=</span><span style=color:#e6db74>&#34;User&#39;s email address&#34;</span>)
+</span></span><span style=display:flex><span>    status: UserStatus <span style=color:#f92672>=</span> Field(default<span style=color:#f92672>=</span>UserStatus<span style=color:#f92672>.</span>pending)
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>app <span style=color:#f92672>=</span> FastAPI(
+</span></span><span style=display:flex><span>    title<span style=color:#f92672>=</span><span style=color:#e6db74>&#34;User Management API&#34;</span>,
+</span></span><span style=display:flex><span>    description<span style=color:#f92672>=</span><span style=color:#e6db74>&#34;RESTful API for user management&#34;</span>,
+</span></span><span style=display:flex><span>    version<span style=color:#f92672>=</span><span style=color:#e6db74>&#34;1.0.0&#34;</span>,
+</span></span><span style=display:flex><span>    docs_url<span style=color:#f92672>=</span><span style=color:#e6db74>&#34;/docs&#34;</span>,
+</span></span><span style=display:flex><span>    redoc_url<span style=color:#f92672>=</span><span style=color:#e6db74>&#34;/redoc&#34;</span>,
+</span></span><span style=display:flex><span>    openapi_url<span style=color:#f92672>=</span><span style=color:#e6db74>&#34;/openapi.json&#34;</span>
+</span></span><span style=display:flex><span>)
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@app.get</span>(
+</span></span><span style=display:flex><span>    <span style=color:#e6db74>&#34;/users&#34;</span>,
+</span></span><span style=display:flex><span>    response_model<span style=color:#f92672>=</span>list[UserResponse],
+</span></span><span style=display:flex><span>    summary<span style=color:#f92672>=</span><span style=color:#e6db74>&#34;List all users&#34;</span>,
+</span></span><span style=display:flex><span>    description<span style=color:#f92672>=</span><span style=color:#e6db74>&#34;Retrieve a paginated list of users&#34;</span>,
+</span></span><span style=display:flex><span>    tags<span style=color:#f92672>=</span>[<span style=color:#e6db74>&#34;users&#34;</span>]
+</span></span><span style=display:flex><span>)
+</span></span><span style=display:flex><span><span style=color:#66d9ef>async</span> <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>list_users</span>(
+</span></span><span style=display:flex><span>    status: Annotated[
+</span></span><span style=display:flex><span>        UserStatus <span style=color:#f92672>|</span> <span style=color:#66d9ef>None</span>,
+</span></span><span style=display:flex><span>        Query(description<span style=color:#f92672>=</span><span style=color:#e6db74>&#34;Filter by user status&#34;</span>)
+</span></span><span style=display:flex><span>    ] <span style=color:#f92672>=</span> <span style=color:#66d9ef>None</span>,
+</span></span><span style=display:flex><span>    page_size: Annotated[
+</span></span><span style=display:flex><span>        int,
+</span></span><span style=display:flex><span>        Query(ge<span style=color:#f92672>=</span><span style=color:#ae81ff>1</span>, le<span style=color:#f92672>=</span><span style=color:#ae81ff>100</span>, description<span style=color:#f92672>=</span><span style=color:#e6db74>&#34;Number of items per page&#34;</span>)
+</span></span><span style=display:flex><span>    ] <span style=color:#f92672>=</span> <span style=color:#ae81ff>20</span>,
+</span></span><span style=display:flex><span>    page_token: Annotated[
+</span></span><span style=display:flex><span>        str <span style=color:#f92672>|</span> <span style=color:#66d9ef>None</span>,
+</span></span><span style=display:flex><span>        Query(description<span style=color:#f92672>=</span><span style=color:#e6db74>&#34;Pagination token&#34;</span>)
+</span></span><span style=display:flex><span>    ] <span style=color:#f92672>=</span> <span style=color:#66d9ef>None</span>
+</span></span><span style=display:flex><span>):
+</span></span><span style=display:flex><span>    <span style=color:#e6db74>&#34;&#34;&#34;List users with optional filtering and pagination.&#34;&#34;&#34;</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>pass</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@app.post</span>(
+</span></span><span style=display:flex><span>    <span style=color:#e6db74>&#34;/users&#34;</span>,
+</span></span><span style=display:flex><span>    response_model<span style=color:#f92672>=</span>UserResponse,
+</span></span><span style=display:flex><span>    status_code<span style=color:#f92672>=</span><span style=color:#ae81ff>201</span>,
+</span></span><span style=display:flex><span>    summary<span style=color:#f92672>=</span><span style=color:#e6db74>&#34;Create a user&#34;</span>,
+</span></span><span style=display:flex><span>    tags<span style=color:#f92672>=</span>[<span style=color:#e6db74>&#34;users&#34;</span>],
+</span></span><span style=display:flex><span>    responses<span style=color:#f92672>=</span>{
+</span></span><span style=display:flex><span>        <span style=color:#ae81ff>409</span>: {<span style=color:#e6db74>&#34;description&#34;</span>: <span style=color:#e6db74>&#34;Email already exists&#34;</span>}
+</span></span><span style=display:flex><span>    }
+</span></span><span style=display:flex><span>)
+</span></span><span style=display:flex><span><span style=color:#66d9ef>async</span> <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>create_user</span>(
+</span></span><span style=display:flex><span>    user: Annotated[CreateUserRequest, Body(<span style=color:#f92672>...</span>)]
+</span></span><span style=display:flex><span>):
+</span></span><span style=display:flex><span>    <span style=color:#e6db74>&#34;&#34;&#34;Create a new user with the provided information.&#34;&#34;&#34;</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>pass</span>
+</span></span></code></pre></div><h2 id=documentation-tools-comparison>Documentation Tools Comparison</h2><table><thead><tr><th>Tool</th><th>Format</th><th>Interactive</th><th>Code Gen</th><th>Best For</th></tr></thead><tbody><tr><td><strong>Swagger UI</strong></td><td>OpenAPI</td><td>Yes</td><td>Yes</td><td>REST APIs</td></tr><tr><td><strong>ReDoc</strong></td><td>OpenAPI</td><td>Limited</td><td>No</td><td>Documentation</td></tr><tr><td><strong>Postman</strong></td><td>Collection</td><td>Yes</td><td>Yes</td><td>Testing</td></tr><tr><td><strong>GraphQL Playground</strong></td><td>GraphQL</td><td>Yes</td><td>No</td><td>GraphQL APIs</td></tr><tr><td><strong>gRPC-Gateway</strong></td><td>Proto</td><td>No</td><td>Yes</td><td>gRPC APIs</td></tr></tbody></table><h2 id=documentation-best-practices>Documentation Best Practices</h2><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none><code class=language-python data-lang=python><span style=display:flex><span><span style=color:#75715e># Include comprehensive error responses</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>@app.post</span>(<span style=color:#e6db74>&#34;/users&#34;</span>, responses<span style=color:#f92672>=</span>{
+</span></span><span style=display:flex><span>    <span style=color:#ae81ff>201</span>: {<span style=color:#e6db74>&#34;description&#34;</span>: <span style=color:#e6db74>&#34;User created successfully&#34;</span>},
+</span></span><span style=display:flex><span>    <span style=color:#ae81ff>400</span>: {<span style=color:#e6db74>&#34;description&#34;</span>: <span style=color:#e6db74>&#34;Invalid input data&#34;</span>, <span style=color:#e6db74>&#34;model&#34;</span>: ErrorResponse},
+</span></span><span style=display:flex><span>    <span style=color:#ae81ff>401</span>: {<span style=color:#e6db74>&#34;description&#34;</span>: <span style=color:#e6db74>&#34;Authentication required&#34;</span>},
+</span></span><span style=display:flex><span>    <span style=color:#ae81ff>403</span>: {<span style=color:#e6db74>&#34;description&#34;</span>: <span style=color:#e6db74>&#34;Insufficient permissions&#34;</span>},
+</span></span><span style=display:flex><span>    <span style=color:#ae81ff>409</span>: {<span style=color:#e6db74>&#34;description&#34;</span>: <span style=color:#e6db74>&#34;Email already exists&#34;</span>},
+</span></span><span style=display:flex><span>    <span style=color:#ae81ff>422</span>: {<span style=color:#e6db74>&#34;description&#34;</span>: <span style=color:#e6db74>&#34;Validation error&#34;</span>, <span style=color:#e6db74>&#34;model&#34;</span>: ValidationError},
+</span></span><span style=display:flex><span>    <span style=color:#ae81ff>500</span>: {<span style=color:#e6db74>&#34;description&#34;</span>: <span style=color:#e6db74>&#34;Internal server error&#34;</span>}
+</span></span><span style=display:flex><span>})
+</span></span><span style=display:flex><span><span style=color:#66d9ef>async</span> <span style=color:#66d9ef>def</span> <span style=color:#a6e22e>create_user</span>(user: CreateUserRequest):
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>pass</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e># Add request/response examples</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#a6e22e>OrderRequest</span>(BaseModel):
+</span></span><span style=display:flex><span>    model_config <span style=color:#f92672>=</span> {
+</span></span><span style=display:flex><span>        <span style=color:#e6db74>&#34;json_schema_extra&#34;</span>: {
+</span></span><span style=display:flex><span>            <span style=color:#e6db74>&#34;examples&#34;</span>: [
+</span></span><span style=display:flex><span>                {
+</span></span><span style=display:flex><span>                    <span style=color:#e6db74>&#34;product_id&#34;</span>: <span style=color:#e6db74>&#34;prod_123&#34;</span>,
+</span></span><span style=display:flex><span>                    <span style=color:#e6db74>&#34;quantity&#34;</span>: <span style=color:#ae81ff>2</span>,
+</span></span><span style=display:flex><span>                    <span style=color:#e6db74>&#34;shipping_address&#34;</span>: {
+</span></span><span style=display:flex><span>                        <span style=color:#e6db74>&#34;street&#34;</span>: <span style=color:#e6db74>&#34;123 Main St&#34;</span>,
+</span></span><span style=display:flex><span>                        <span style=color:#e6db74>&#34;city&#34;</span>: <span style=color:#e6db74>&#34;San Francisco&#34;</span>
+</span></span><span style=display:flex><span>                    }
+</span></span><span style=display:flex><span>                }
+</span></span><span style=display:flex><span>            ]
+</span></span><span style=display:flex><span>        }
+</span></span><span style=display:flex><span>    }
+</span></span></code></pre></div><h2 id=best-practices>Best Practices</h2><ol><li><strong>Version Your Docs</strong>: Keep documentation in sync with API versions</li><li><strong>Include Examples</strong>: Provide realistic request/response examples</li><li><strong>Document Errors</strong>: List all possible error codes and their meanings</li><li><strong>Use Consistent Naming</strong>: Follow naming conventions throughout</li><li><strong>Keep Updated</strong>: Automate documentation generation from code</li><li><strong>Test Examples</strong>: Ensure all examples are valid and working</li></ol></div><footer class=article-footer><a href=/portfolio/articles/backend/03-api-protocols/ class=back-link>← Back to API & Protocols</a></footer></article></main><footer class=site-footer><p>&copy; 2026 YuHan Jhou. All rights reserved.</p></footer></div></div><script src=https://yu-codes.github.io/portfolio/js/theme.js defer></script><script src=https://yu-codes.github.io/portfolio/js/roadmap.js defer></script><script src=https://yu-codes.github.io/portfolio/js/parallax.js defer></script><script src=https://yu-codes.github.io/portfolio/js/page-transition.js defer></script></body></html>

@@ -1,0 +1,58 @@
+<!doctype html><html lang=zh class=html><head><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><title>邊緣與行動端部署 - Yu's Portfolio & Learning Hub</title><meta name=description content="不是所有的推論都適合在雲端做。當你需要離線運作、超低延遲或保護隱私時，把模型部署到邊緣裝置（手機、IoT 設備）是更好的選擇。
+為什麼需要邊緣部署？ 延遲 雲端推論需要網路往返（至少幾十毫秒）。邊緣推論在裝置上直接執行，延遲可以低到幾毫秒。
+對於即時應用（如 AR、自動駕駛），這個差距是致命的。
+隱私 資料不需要離開裝置。對於敏感資料（醫療影像、人臉、語音），這是合規的要求。
+離線可用 沒有網路也能工作。對於偏遠地區、地下環境、飛機上的應用至關重要。
+成本 不需要雲端伺服器。當裝置數量很大時，邊緣推論的總成本可能遠低於雲端。
+邊緣部署的挑戰 計算資源有限 手機 GPU 的算力大約是伺服器 GPU 的 1/100。IoT 設備可能只有 CPU，甚至是微控制器。
+記憶體限制 手機可用記憶體通常只有幾 GB，IoT 設備可能只有幾 MB。
+能耗限制 電池供電的裝置對能耗極為敏感。GPU 推論消耗大量電力。
+多樣化硬體 Android 有數千種不同的晶片組合，你的模型需要在所有上面都能運行。
+模型壓縮技術 量化 INT8 量化是邊緣部署的標配。有些硬體甚至支援 INT4。
+剪枝 移除不重要的連接或通道，減少計算量。
+知識蒸餾 用大模型指導訓練小模型。
+輕量級架構 專為行動端設計的模型架構：
+架構 特色 MobileNet 深度可分離卷積，極度輕量 EfficientNet-Lite 自動搜索的高效架構 ShuffleNet 通道洗牌，計算效率高 SqueezeNet 參數極少的 CNN TinyBERT BERT 的壓縮版本 神經架構搜索（NAS） 自動搜索適合特定硬體約束的最優架構。給定延遲和記憶體預算，找出效能最好的架構。
+部署框架 TensorFlow Lite Google 的行動端推論框架。支援 Android、iOS、微控制器。
+特色：
+廣泛的硬體支援 強大的量化工具 GPU 和 NNAPI 加速 Core ML Apple 的原生 ML 框架。在 iOS/macOS 上效能最佳。
+"><meta property="og:title" content="邊緣與行動端部署"><meta property="og:description" content="不是所有的推論都適合在雲端做。當你需要離線運作、超低延遲或保護隱私時，把模型部署到邊緣裝置（手機、IoT 設備）是更好的選擇。
+為什麼需要邊緣部署？ 延遲 雲端推論需要網路往返（至少幾十毫秒）。邊緣推論在裝置上直接執行，延遲可以低到幾毫秒。
+對於即時應用（如 AR、自動駕駛），這個差距是致命的。
+隱私 資料不需要離開裝置。對於敏感資料（醫療影像、人臉、語音），這是合規的要求。
+離線可用 沒有網路也能工作。對於偏遠地區、地下環境、飛機上的應用至關重要。
+成本 不需要雲端伺服器。當裝置數量很大時，邊緣推論的總成本可能遠低於雲端。
+邊緣部署的挑戰 計算資源有限 手機 GPU 的算力大約是伺服器 GPU 的 1/100。IoT 設備可能只有 CPU，甚至是微控制器。
+記憶體限制 手機可用記憶體通常只有幾 GB，IoT 設備可能只有幾 MB。
+能耗限制 電池供電的裝置對能耗極為敏感。GPU 推論消耗大量電力。
+多樣化硬體 Android 有數千種不同的晶片組合，你的模型需要在所有上面都能運行。
+模型壓縮技術 量化 INT8 量化是邊緣部署的標配。有些硬體甚至支援 INT4。
+剪枝 移除不重要的連接或通道，減少計算量。
+知識蒸餾 用大模型指導訓練小模型。
+輕量級架構 專為行動端設計的模型架構：
+架構 特色 MobileNet 深度可分離卷積，極度輕量 EfficientNet-Lite 自動搜索的高效架構 ShuffleNet 通道洗牌，計算效率高 SqueezeNet 參數極少的 CNN TinyBERT BERT 的壓縮版本 神經架構搜索（NAS） 自動搜索適合特定硬體約束的最優架構。給定延遲和記憶體預算，找出效能最好的架構。
+部署框架 TensorFlow Lite Google 的行動端推論框架。支援 Android、iOS、微控制器。
+特色：
+廣泛的硬體支援 強大的量化工具 GPU 和 NNAPI 加速 Core ML Apple 的原生 ML 框架。在 iOS/macOS 上效能最佳。
+"><meta property="og:url" content="https://yu-codes.github.io/portfolio/zh/articles/ai/08-inference-serving/04-edge-mobile/"><link rel=canonical href=https://yu-codes.github.io/portfolio/zh/articles/ai/08-inference-serving/04-edge-mobile/><link rel=stylesheet href=https://yu-codes.github.io/portfolio/css/main.css></head><body class=body><div class=container><aside class=sidebar><div class=sidebar-header><h1 class=name>Yu</h1><p class=tagline>Developer, dreamer, debugger.</p></div><nav class=sidebar-nav><a href=https://yu-codes.github.io/portfolio/zh/ class=nav-item><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+<span>首頁</span>
+</a><a href=https://yu-codes.github.io/portfolio/zh/articles/ class="nav-item active"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5.0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5.0 014 19.5v-15A2.5 2.5.0 016.5 2z"/></svg>
+<span>文章</span>
+</a><a href=https://yu-codes.github.io/portfolio/zh/resume/ class=nav-item><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6A2 2 0 004 4v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+<span>履歷</span>
+</a><a href=https://yu-codes.github.io/portfolio/zh/projects/ class=nav-item><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8"/><rect x="13" y="3" width="8" height="8"/><rect x="3" y="13" width="8" height="8"/><rect x="13" y="13" width="8" height="8"/></svg>
+<span>專案</span>
+</a><a href=https://yu-codes.github.io/portfolio/zh/archives/ class=nav-item><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+<span>歸檔</span></a></nav><div class=sidebar-footer><div class=controls><button class="control-btn theme-toggle" title=切換主題（淺色/深色） aria-label="Toggle theme">
+<svg class="icon-sun" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M12 3a9 9 0 010 18" fill="currentColor" opacity=".9"/><path d="M12 3a9 9 0 000 18" fill="currentColor" opacity=".25"/></svg>
+<svg class="icon-moon" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M12 3a9 9 0 000 18" fill="currentColor" opacity=".9"/><path d="M12 3a9 9 0 010 18" fill="currentColor" opacity=".25"/></svg>
+</button>
+<button class="control-btn lang-toggle" title=切換語言 aria-label="Toggle language">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3.0 014 10 15.3 15.3.0 01-4 10A15.3 15.3.0 018 12a15.3 15.3.0 014-10z"/></svg></button></div><div class=social-links><a href=https://github.com/yu-codes target=_blank rel="noopener noreferrer" class=social-link title=GitHub><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.374.0.0 5.373.0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931.0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176.0.0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221.0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/></svg>
+</a><a href=mailto:dylan.jhou1120@gmail.com class=social-link title=Email><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1.0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1.0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></a></div></div></aside><div class=main-content><div class=topbar><div class=breadcrumb><a href=https://yu-codes.github.io/portfolio/zh/>首頁</a>
+<span class=separator>&#8250;</span>
+<a href=https://yu-codes.github.io/portfolio/zh/articles/>文章</a>
+<span class=separator>&#8250;</span>
+<a href=https://yu-codes.github.io/portfolio/zh/articles/ai/>AI Engineering</a><span class=separator>&#8250;</span>
+<a href=https://yu-codes.github.io/portfolio/zh/articles/ai/08-inference-serving/>Inference & Serving</a><span class=separator>&#8250;</span>
+<span>邊緣與行動端部署</span></div></div><main class=content-area><article class=article-content><header class=article-header><h1>邊緣與行動端部署</h1><div class=article-meta><span class=article-description>把 AI 帶到裝置上：邊緣運算與行動端模型部署的策略與挑戰</span></div></header><nav class=article-toc><h2 class=toc-title>目錄</h2><nav id=TableOfContents><ul><li><a href=#為什麼需要邊緣部署>為什麼需要邊緣部署？</a><ul><li><a href=#延遲>延遲</a></li><li><a href=#隱私>隱私</a></li><li><a href=#離線可用>離線可用</a></li><li><a href=#成本>成本</a></li></ul></li><li><a href=#邊緣部署的挑戰>邊緣部署的挑戰</a><ul><li><a href=#計算資源有限>計算資源有限</a></li><li><a href=#記憶體限制>記憶體限制</a></li><li><a href=#能耗限制>能耗限制</a></li><li><a href=#多樣化硬體>多樣化硬體</a></li></ul></li><li><a href=#模型壓縮技術>模型壓縮技術</a><ul><li><a href=#量化>量化</a></li><li><a href=#剪枝>剪枝</a></li><li><a href=#知識蒸餾>知識蒸餾</a></li><li><a href=#輕量級架構>輕量級架構</a></li><li><a href=#神經架構搜索nas>神經架構搜索（NAS）</a></li></ul></li><li><a href=#部署框架>部署框架</a><ul><li><a href=#tensorflow-lite>TensorFlow Lite</a></li><li><a href=#core-ml>Core ML</a></li><li><a href=#onnx-runtime-mobile>ONNX Runtime Mobile</a></li><li><a href=#mediapipe>MediaPipe</a></li></ul></li><li><a href=#聯邦學習federated-learning>聯邦學習（Federated Learning）</a></li><li><a href=#部署流程>部署流程</a></li><li><a href=#實務心法>實務心法</a></li></ul></nav></nav><div class=article-body><p>不是所有的推論都適合在雲端做。當你需要離線運作、超低延遲或保護隱私時，把模型部署到邊緣裝置（手機、IoT 設備）是更好的選擇。</p><h2 id=為什麼需要邊緣部署>為什麼需要邊緣部署？</h2><h3 id=延遲>延遲</h3><p>雲端推論需要網路往返（至少幾十毫秒）。邊緣推論在裝置上直接執行，延遲可以低到幾毫秒。</p><p>對於即時應用（如 AR、自動駕駛），這個差距是致命的。</p><h3 id=隱私>隱私</h3><p>資料不需要離開裝置。對於敏感資料（醫療影像、人臉、語音），這是合規的要求。</p><h3 id=離線可用>離線可用</h3><p>沒有網路也能工作。對於偏遠地區、地下環境、飛機上的應用至關重要。</p><h3 id=成本>成本</h3><p>不需要雲端伺服器。當裝置數量很大時，邊緣推論的總成本可能遠低於雲端。</p><h2 id=邊緣部署的挑戰>邊緣部署的挑戰</h2><h3 id=計算資源有限>計算資源有限</h3><p>手機 GPU 的算力大約是伺服器 GPU 的 1/100。IoT 設備可能只有 CPU，甚至是微控制器。</p><h3 id=記憶體限制>記憶體限制</h3><p>手機可用記憶體通常只有幾 GB，IoT 設備可能只有幾 MB。</p><h3 id=能耗限制>能耗限制</h3><p>電池供電的裝置對能耗極為敏感。GPU 推論消耗大量電力。</p><h3 id=多樣化硬體>多樣化硬體</h3><p>Android 有數千種不同的晶片組合，你的模型需要在所有上面都能運行。</p><h2 id=模型壓縮技術>模型壓縮技術</h2><h3 id=量化>量化</h3><p>INT8 量化是邊緣部署的標配。有些硬體甚至支援 INT4。</p><h3 id=剪枝>剪枝</h3><p>移除不重要的連接或通道，減少計算量。</p><h3 id=知識蒸餾>知識蒸餾</h3><p>用大模型指導訓練小模型。</p><h3 id=輕量級架構>輕量級架構</h3><p>專為行動端設計的模型架構：</p><table><thead><tr><th>架構</th><th>特色</th></tr></thead><tbody><tr><td>MobileNet</td><td>深度可分離卷積，極度輕量</td></tr><tr><td>EfficientNet-Lite</td><td>自動搜索的高效架構</td></tr><tr><td>ShuffleNet</td><td>通道洗牌，計算效率高</td></tr><tr><td>SqueezeNet</td><td>參數極少的 CNN</td></tr><tr><td>TinyBERT</td><td>BERT 的壓縮版本</td></tr></tbody></table><h3 id=神經架構搜索nas>神經架構搜索（NAS）</h3><p>自動搜索適合特定硬體約束的最優架構。給定延遲和記憶體預算，找出效能最好的架構。</p><h2 id=部署框架>部署框架</h2><h3 id=tensorflow-lite>TensorFlow Lite</h3><p>Google 的行動端推論框架。支援 Android、iOS、微控制器。</p><p>特色：</p><ul><li>廣泛的硬體支援</li><li>強大的量化工具</li><li>GPU 和 NNAPI 加速</li></ul><h3 id=core-ml>Core ML</h3><p>Apple 的原生 ML 框架。在 iOS/macOS 上效能最佳。</p><p>特色：</p><ul><li>深度整合 Apple 硬體（Neural Engine）</li><li>支援 on-device training</li><li>隱私優先設計</li></ul><h3 id=onnx-runtime-mobile>ONNX Runtime Mobile</h3><p>微軟的跨平台行動端推論。</p><h3 id=mediapipe>MediaPipe</h3><p>Google 的即時 ML 管線框架。提供開箱即用的解決方案（手勢偵測、人臉偵測等）。</p><h2 id=聯邦學習federated-learning>聯邦學習（Federated Learning）</h2><p>一種特殊的邊緣 AI 模式：模型在裝置上訓練，只把梯度（而非原始資料）傳回伺服器。</p><p>好處：</p><ul><li>資料不離開裝置（隱私保護）</li><li>利用邊緣設備的計算能力</li><li>能學到個人化的模型</li></ul><p>Google 的鍵盤預測就是用聯邦學習訓練的。</p><h2 id=部署流程>部署流程</h2><ol><li>在雲端用大模型訓練</li><li>知識蒸餾到小模型</li><li>量化和優化</li><li>轉換為目標格式（TFLite、Core ML、ONNX）</li><li>在目標裝置上測試效能</li><li>打包到應用程式中</li><li>設定 OTA 更新機制</li></ol><h2 id=實務心法>實務心法</h2><ol><li><strong>從輕量架構開始設計</strong>——把大模型壓縮到邊緣，不如一開始就用適合邊緣的架構</li><li><strong>在真實裝置上測試</strong>——模擬器的效能數據不可靠</li><li><strong>INT8 量化是標配</strong>——通常精度損失可忽略</li><li><strong>考慮模型更新機制</strong>——OTA 更新比重新發布 App 方便得多</li></ol></div><footer class=article-footer><a href=/portfolio/zh/articles/ai/08-inference-serving/ class=back-link>← 返回 Inference & Serving</a></footer></article></main><footer class=site-footer><p>&copy; 2026 YuHan Jhou. All rights reserved.</p></footer></div></div><script src=https://yu-codes.github.io/portfolio/js/theme.js defer></script><script src=https://yu-codes.github.io/portfolio/js/roadmap.js defer></script><script src=https://yu-codes.github.io/portfolio/js/parallax.js defer></script><script src=https://yu-codes.github.io/portfolio/js/page-transition.js defer></script></body></html>
